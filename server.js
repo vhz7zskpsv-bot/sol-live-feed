@@ -17,7 +17,6 @@ setInterval(() => {
   recentSales = recentSales.filter(sale => sale.timestamp >= oneHourAgo);
 }, 30000);
 
-// Collection ka clean naam nikalne ka helper (verified & unverified dono ke liye)
 function deriveCollectionName(rawName, symbol) {
   const cleaned = (rawName || '').replace(/#\d+.*$/, '').trim();
   if (cleaned && cleaned.length > 1) return cleaned;
@@ -25,7 +24,6 @@ function deriveCollectionName(rawName, symbol) {
   return 'New Unverified NFT';
 }
 
-// Helius DAS API (getAsset) se verified + unverified metadata fetch karna
 async function fetchNftMetadata(mint) {
   if (!mint || !HELIUS_API_KEY) return null;
   if (metadataCache.has(mint)) return metadataCache.get(mint);
@@ -49,11 +47,9 @@ async function fetchNftMetadata(mint) {
     const symbol = result.content?.metadata?.symbol || '';
     const image = result.content?.links?.image || result.content?.files?.[0]?.uri || '';
 
-    // Check karein ke collection verified hai ya unverified
     const collectionGroup = result.grouping?.find(g => g.group_key === 'collection');
     const isVerified = Boolean(collectionGroup?.group_value);
 
-    // Update authority (naya mint ya unverified collection aksar same authority se aata hai)
     const authority =
       result.authorities?.find(a => a.scopes?.includes('full'))?.address ||
       result.authorities?.[0]?.address ||
@@ -61,7 +57,6 @@ async function fetchNftMetadata(mint) {
 
     const collectionName = deriveCollectionName(nftName, symbol);
 
-    // Unique grouping key: verified ho toh collection address, warna name + authority
     const groupKey = isVerified
       ? `ver:${collectionGroup.group_value}`
       : `unver:${collectionName.toLowerCase()}:${authority.slice(0, 8)}`;
@@ -122,11 +117,19 @@ app.post('/webhook/helius', async (req, res) => {
   }
 });
 
-// 2. API ENDPOINT FOR 5M / 15M / 1H
+// 2. API ENDPOINT FOR 5M / 15M / 1H + FILTER (all | unverified | verified)
 app.get('/api/trending', (req, res) => {
   const minutes = parseInt(req.query.tf) || 5;
+  const filter = req.query.filter || 'all';
   const cutoff = Date.now() - minutes * 60 * 1000;
-  const filtered = recentSales.filter(s => s.timestamp >= cutoff);
+
+  let filtered = recentSales.filter(s => s.timestamp >= cutoff);
+
+  if (filter === 'unverified') {
+    filtered = filtered.filter(s => !s.isVerified);
+  } else if (filter === 'verified') {
+    filtered = filtered.filter(s => s.isVerified);
+  }
 
   const grouped = {};
   filtered.forEach(sale => {
@@ -157,6 +160,7 @@ app.get('/api/trending', (req, res) => {
 
   res.json({
     timeframe: `${minutes}m`,
+    filter,
     totalSalesInWindow: filtered.length,
     collections: leaderboard,
     liveFeed: filtered.slice(0, 20)
@@ -177,13 +181,17 @@ app.get('/', (req, res) => {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
     body { background: #0b0e14; color: #f1f5f9; padding: 16px; padding-top: env(safe-area-inset-top, 20px); }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
     .title { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
     .dot { width: 10px; height: 10px; background: #14f195; border-radius: 50%; box-shadow: 0 0 8px #14f195; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; background: #151a24; padding: 4px; border-radius: 12px; margin-bottom: 16px; }
-    .tab { padding: 10px; text-align: center; border-radius: 9px; font-weight: 600; font-size: 14px; color: #94a3b8; cursor: pointer; border: none; background: transparent; }
+    .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; background: #151a24; padding: 4px; border-radius: 12px; margin-bottom: 10px; }
+    .tab { padding: 9px; text-align: center; border-radius: 9px; font-weight: 600; font-size: 14px; color: #94a3b8; cursor: pointer; border: none; background: transparent; }
     .tab.active { background: #9945ff; color: #fff; }
+    .filters { display: flex; gap: 8px; margin-bottom: 14px; }
+    .f-btn { flex: 1; padding: 7px 10px; border-radius: 9px; font-size: 12px; font-weight: 600; border: 1px solid #222938; background: #151a24; color: #94a3b8; cursor: pointer; }
+    .f-btn.active { border-color: #14f195; color: #14f195; background: rgba(20, 241, 149, 0.1); }
+    .f-btn.unver.active { border-color: #fbbf24; color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
     .stats-bar { font-size: 13px; color: #94a3b8; margin-bottom: 12px; display: flex; justify-content: space-between; }
     .card { background: #151a24; border: 1px solid #222938; border-radius: 14px; padding: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; text-decoration: none; color: inherit; }
     .left { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -212,8 +220,14 @@ app.get('/', (req, res) => {
     <button class="tab" onclick="setTf(60, this)">1H</button>
   </div>
 
+  <div class="filters">
+    <button class="f-btn active" onclick="setFilter('all', this)">All Collections</button>
+    <button class="f-btn unver" onclick="setFilter('unverified', this)">Unverified Only</button>
+    <button class="f-btn" onclick="setFilter('verified', this)">Verified Only</button>
+  </div>
+
   <div class="stats-bar">
-    <span>Trending Collections (Verified & Unverified)</span>
+    <span>Trending Collections</span>
     <span id="total-count">0 sales</span>
   </div>
 
@@ -224,6 +238,7 @@ app.get('/', (req, res) => {
 
   <script>
     let currentTf = 5;
+    let currentFilter = 'all';
     const fallbackImg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46"><rect width="46" height="46" fill="%231e2533"/></svg>';
 
     function setTf(tf, el) {
@@ -233,9 +248,16 @@ app.get('/', (req, res) => {
       fetchData();
     }
 
+    function setFilter(filter, el) {
+      currentFilter = filter;
+      document.querySelectorAll('.f-btn').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+      fetchData();
+    }
+
     async function fetchData() {
       try {
-        const res = await fetch('/api/trending?tf=' + currentTf);
+        const res = await fetch('/api/trending?tf=' + currentTf + '&filter=' + currentFilter);
         const data = await res.json();
 
         document.getElementById('total-count').innerText = data.totalSalesInWindow + ' sales';
@@ -243,7 +265,7 @@ app.get('/', (req, res) => {
 
         const listEl = document.getElementById('collections-list');
         if (data.collections.length === 0) {
-          listEl.innerHTML = '<div class="empty">Is timeframe mein abhi koi sale nahi hui.<br/>Verified aur unverified naye collections ki sale aate hi yahan show hogi.</div>';
+          listEl.innerHTML = '<div class="empty">Is filter aur timeframe mein abhi koi sale nahi hui.<br/>Jaise hi sale hogi yahan live show hogi.</div>';
         } else {
           listEl.innerHTML = data.collections.map((c, i) => \`
             <a class="card" href="https://solscan.io/token/\${c.lastMint}" target="_blank">
