@@ -110,4 +110,5 @@ app.post('/webhook/helius', async (req, res) => {
         verified: Boolean(meta?.verified),
         image: meta?.image || '',
         priceSol,
-        marketplace: saleInfo.source || ev.source || 'Solana
+        marketplace: 'Solana',
+
