@@ -47,7 +47,6 @@ function connectHelius() {
   heliusWs.on('open', () => {
     console.log('✅ Connected to Helius WebSocket');
 
-    // Free tier ke liye better filter (Magic Eden + Tensor example)
     const subscribeMsg = {
       jsonrpc: '2.0',
       id: 1,
@@ -56,8 +55,8 @@ function connectHelius() {
         {
           failed: false,
           accountInclude: [
-            "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K", // Magic Eden v2
-            "TSWAPaqyCSx2KABk68Shruf4rp7CxcNi8hAsbdwmHbN"  // Tensor
+            "M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K",
+            "TSWAPaqyCSx2KABk68Shruf4rp7CxcNi8hAsbdwmHbN"
           ]
         },
         {
@@ -77,7 +76,6 @@ function connectHelius() {
       const msg = JSON.parse(data.toString());
       if (msg.method === 'transactionNotification') {
         console.log('New transaction received');
-        // Yahan baad mein sale parse karenge
       }
     } catch (err) {
       console.error('Parse error:', err.message);
@@ -94,7 +92,6 @@ function connectHelius() {
   });
 }
 
-// Yeh line sabse important hai
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
   connectHelius();
