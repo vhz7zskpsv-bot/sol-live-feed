@@ -127,17 +127,22 @@ function isListingRecord(x) {
     (nested && typeof nested === 'object');
 }
 function findListingRows(value, depth = 0) {
-  if (!value || depth > 7) return [];
+  if (!value || depth > 9) return [];
   if (Array.isArray(value)) {
-    if (value.length && value.some(isListingRecord)) return value.filter(x => x && typeof x === 'object');
-    for (const item of value) { const rows = findListingRows(item, depth + 1); if (rows.length) return rows; }
+    const rows = value.filter(x => x && typeof x === 'object' && !Array.isArray(x));
+    const score = rows.reduce((n, x) => {
+      const k = Object.keys(x).join(' ').toLowerCase();
+      return n + (/mint|token|price|listing|seller|pda|escrow|rarity|image|name/.test(k) || x.token || x.nft || x.asset ? 1 : 0);
+    }, 0);
+    if (rows.length && score > 0) return rows;
+    for (const item of value) { const found = findListingRows(item, depth + 1); if (found.length) return found; }
     return [];
   }
   if (typeof value === 'object') {
-    for (const key of ['listings','items','results','tokens','data','records','nfts','assets']) {
-      if (key in value) { const rows = findListingRows(value[key], depth + 1); if (rows.length) return rows; }
+    for (const key of ['listings','items','results','tokens','nfts','assets','records','data']) {
+      if (key in value) { const found = findListingRows(value[key], depth + 1); if (found.length) return found; }
     }
-    for (const child of Object.values(value)) { const rows = findListingRows(child, depth + 1); if (rows.length) return rows; }
+    for (const child of Object.values(value)) { const found = findListingRows(child, depth + 1); if (found.length) return found; }
   }
   return [];
 }
@@ -254,7 +259,7 @@ app.get('/api/market/collection/:symbol/listings', async (req, res) => {
   const key = symbol.toLowerCase(), cached = listingsCache.get(key);
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
-    const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:50, sort:'listPrice', order:'asc' });
+    const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:50, sort:'listPrice', order:'asc', sort_direction:'asc' });
     const items = findListingRows(data);
     const result = { success:true, symbol, source:'API.SH / Magic Eden', count:items.length,
       credits_used:data?.credits_used ?? data?.meta?.credits_used ?? null, items, data };
