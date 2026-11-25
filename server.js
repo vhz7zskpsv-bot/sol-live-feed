@@ -102,7 +102,7 @@ button:active{transform:scale(.98)}pre{white-space:pre-wrap;overflow-wrap:anywhe
 <div id="status" class="status">Checking API.SH configuration…</div></section>
 <div class="actions">
 <button onclick="loadData('/api/activities?type=buyNow&limit=100','Recent sales')">Recent sales</button>
-<button onclick="loadData('/api/collections?limit=30','Collections')">Collections</button>
+<button onclick="loadData('/api/collections?limit=20','Collections')">Collections</button>
 <button onclick="loadData('/api/listings?symbol=okay_bears&limit=20','Example listings (Okay Bears)')">Example listings</button>
 </div>
 <div class="muted">API response (raw JSON — no synthetic/demo records)</div><pre id="output">Choose an endpoint above to request live data.</pre>
@@ -130,7 +130,7 @@ server.listen(PORT, '0.0.0.0', () => {
   }
 
   // One low-cost authentication/configuration probe at startup (1 API.SH credit).
-  apiShGet('/magiceden/v1/collections', { limit: 1 })
+  apiShGet('/magiceden/v1/collections', { limit: 20 })
     .then(data => console.log('API.SH authentication OK; collections endpoint responded.',
       'credits_used:', data?.credits_used ?? 'not reported'))
     .catch(error => console.error('API.SH startup check failed:',
