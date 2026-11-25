@@ -103,6 +103,7 @@ async function apiShGet(path, query = {}) {
 const directoryCache = { at: 0, data: null };
 const salesCache = new Map();
 const listingsCache = new Map();
+const activitiesCache = new Map();
 const launchCache = { at: 0, data: null };
 
 async function quicknodeRpc(method, params) {
@@ -199,7 +200,7 @@ function findArray(value, predicate, depth = 0) {
     return [];
   }
   if (typeof value === 'object') {
-    for (const key of ['collections','results','items','data','listings','tokens','records']) {
+    for (const key of ['collections','results','items','data','listings','activities','tokens','records']) {
       if (key in value) { const found = findArray(value[key], predicate, depth + 1); if (found.length) return found; }
     }
     for (const child of Object.values(value)) { const found = findArray(child, predicate, depth + 1); if (found.length) return found; }
@@ -227,7 +228,7 @@ function findListingRows(value, depth = 0) {
     return [];
   }
   if (typeof value === 'object') {
-    for (const key of ['listings','items','results','tokens','nfts','assets','records','data']) {
+    for (const key of ['listings','activities','items','results','tokens','nfts','assets','records','data']) {
       if (key in value) { const found = findListingRows(value[key], depth + 1); if (found.length) return found; }
     }
     for (const child of Object.values(value)) { const found = findListingRows(child, depth + 1); if (found.length) return found; }
@@ -341,6 +342,23 @@ app.get('/api/market/collections', async (req, res) => {
     res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
   }
 });
+app.get('/api/market/collection/:symbol/activities', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim();
+  if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid collection symbol' });
+  const key = symbol.toLowerCase(), cached = activitiesCache.get(key);
+  if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
+  try {
+    const data = await apiShGet('/magiceden/v1/activities', { symbol, type:'buyNow', limit:40, page:1 });
+    const items = findListingRows(data);
+    const result = { success:true, symbol, source:'API.SH / Magic Eden activity', count:items.length,
+      credits_used:data?.credits_used ?? data?.meta?.credits_used ?? null, items, data };
+    activitiesCache.set(key, { at:Date.now(), data:result }); res.json(result);
+  } catch (error) {
+    console.error('Magic Eden collection activities failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success:false, source:'API.SH Magic Eden activities', error:error.message, details:error.details || undefined });
+  }
+});
+
 app.get('/api/market/collection/:symbol/listings', async (req, res) => {
   const symbol = String(req.params.symbol || '').trim();
   if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid collection symbol' });
