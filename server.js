@@ -301,7 +301,9 @@ async function getGlobalNftSales(minutes) {
     if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
     groups.set(key, g);
   }
-  await Promise.all([...groups.values()].filter(g => g.collectionAddress && g.sampleMint)
+  // Resolve every NFT mint to its Magic Eden collection, even when Bitquery
+  // omits Currency.CollectionAddress. Many valid trades only carry MintAddress.
+  await Promise.all([...groups.values()].filter(g => g.sampleMint)
     .map(async g => { g.resolvedSymbol = await lookupCollectionSymbolFromMint(g.sampleMint); }));
   const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
   salesCache.set(minutes, { at: Date.now(), data }); return data;
