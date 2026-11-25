@@ -98,6 +98,68 @@ async function apiShGet(path, query = {}) {
   return body;
 }
 
+
+const directoryCache = { at: 0, data: null };
+const salesCache = new Map();
+const listingsCache = new Map();
+
+function findArray(value, predicate, depth = 0) {
+  if (!value || depth > 5) return [];
+  if (Array.isArray(value)) {
+    if (value.some(x => x && typeof x === 'object' && predicate(x))) return value;
+    for (const x of value) { const found = findArray(x, predicate, depth + 1); if (found.length) return found; }
+    return [];
+  }
+  if (typeof value === 'object') {
+    for (const key of ['collections','results','items','data','listings','tokens','records']) {
+      if (key in value) { const found = findArray(value[key], predicate, depth + 1); if (found.length) return found; }
+    }
+    for (const child of Object.values(value)) { const found = findArray(child, predicate, depth + 1); if (found.length) return found; }
+  }
+  return [];
+}
+function normalizeCollection(x) {
+  const symbol = x.symbol || x.collectionSymbol || x.collection_symbol || x.id || '';
+  return { symbol: String(symbol), name: x.name || x.title || x.collectionName || String(symbol),
+    image: x.image || x.imageUrl || x.imageURL || x.imageUri || x.imageURI || x.logo || x.logoUrl || null,
+    floorPrice: x.floorPrice ?? x.floor_price ?? x.floor ?? null,
+    listedCount: x.listedCount ?? x.listed_count ?? x.listed ?? null,
+    verified: x.isVerified ?? x.verified ?? false, raw: x };
+}
+async function getCollectionDirectory() {
+  if (directoryCache.data && Date.now() - directoryCache.at < 60000) return directoryCache.data;
+  const raw = await apiShGet('/magiceden/v1/collections', { offset: 0, limit: 100 });
+  const rows = findArray(raw, x => x.symbol || x.collectionSymbol || x.collection_symbol).map(normalizeCollection).filter(x => x.symbol);
+  directoryCache.at = Date.now(); directoryCache.data = { rows, raw }; return directoryCache.data;
+}
+async function getGlobalNftSales(minutes) {
+  const old = salesCache.get(minutes);
+  if (old && Date.now() - old.at < 10000) return old.data;
+  const since = new Date(Date.now() - minutes * 60000).toISOString();
+  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Symbol Name MintAddress } Amount Side { Amount Currency { Symbol } } } } } }';
+  const payload = await bitqueryGraphql(query);
+  if (payload.errors?.length) { const e = new Error(payload.errors[0].message); e.details = payload.errors; throw e; }
+  const sales = (payload.data?.Solana?.DEXTradeByTokens || []).map(row => {
+    const t = row.Trade || {};
+    return { time: row.Block?.Time || null, signature: row.Transaction?.Signature || null,
+      symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Name || t.Currency?.Symbol || 'Unknown',
+      mint: t.Currency?.MintAddress || null, nftAmount: t.Amount ?? null,
+      price: t.Side?.Amount ?? null, priceCurrency: t.Side?.Currency?.Symbol || null,
+      marketplace: t.Dex?.ProtocolName || t.Dex?.ProtocolFamily || 'Magic Eden' };
+  });
+  const groups = new Map();
+  for (const sale of sales) {
+    const key = sale.symbol;
+    const g = groups.get(key) || { symbol: key, name: sale.name, salesCount: 0, volumeSol: 0, lastSale: sale.time, marketplace: sale.marketplace };
+    g.salesCount++;
+    if (sale.priceCurrency === 'SOL' && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
+    if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
+    groups.set(key, g);
+  }
+  const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
+  salesCache.set(minutes, { at: Date.now(), data }); return data;
+}
+
 function proxyApiSh(path, allowedParams) {
   return async (req, res) => {
     try {
@@ -138,6 +200,45 @@ app.get('/api/bitquery/test', async (req, res) => {
     res.status(error.status || 502).json({ success: false, provider: 'Bitquery V2', error: error.message, details: error.details || undefined });
   }
 });
+
+app.get('/api/market/collections', async (req, res) => {
+  const minutes = [5,15,60,1440].includes(Number(req.query.minutes)) ? Number(req.query.minutes) : 15;
+  try {
+    const [directoryResult, salesResult] = await Promise.allSettled([getCollectionDirectory(), getGlobalNftSales(minutes)]);
+    const directory = directoryResult.status === 'fulfilled' ? directoryResult.value.rows : [];
+    const salesData = salesResult.status === 'fulfilled' ? salesResult.value : { sales: [], groups: [] };
+    const bySymbol = new Map(directory.map(x => [x.symbol.toLowerCase(), x]));
+    const active = salesData.groups.map(g => {
+      const meta = bySymbol.get(g.symbol.toLowerCase());
+      return { ...(meta || { symbol:g.symbol, name:g.name, image:null, floorPrice:null, listedCount:null, verified:false }),
+        salesCount:g.salesCount, volumeSol:g.volumeSol, lastSale:g.lastSale, marketplace:g.marketplace };
+    });
+    const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
+    const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
+      .map(x => ({ ...x, salesCount:0, volumeSol:0, lastSale:null, marketplace:null }));
+    res.json({ success:true, minutes, collections:[...active, ...inactive], activeCollections:active.length,
+      sales:salesData.sales, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
+      limitations:['Tensor trades are not included in the current Bitquery feed.','Only collections present in the API.SH directory have directory artwork and metadata.'] });
+  } catch (error) {
+    console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
+  }
+});
+app.get('/api/market/collection/:symbol/listings', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim();
+  if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid collection symbol' });
+  const key = symbol.toLowerCase(), cached = listingsCache.get(key);
+  if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
+  try {
+    const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:50, sort:'listPrice', order:'asc' });
+    const result = { success:true, symbol, source:'API.SH / Magic Eden', data };
+    listingsCache.set(key, { at:Date.now(), data:result }); res.json(result);
+  } catch (error) {
+    console.error('Magic Eden listings failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success:false, source:'API.SH Magic Eden listings', error:error.message, details:error.details || undefined });
+  }
+});
+
 app.get('/api/config', (req, res) => {
   res.json({
     provider: 'API.SH / Magic Eden',
