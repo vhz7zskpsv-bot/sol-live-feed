@@ -57,7 +57,7 @@ async function loadMarket(){
  try{
   const r=await fetch('/api/market/collections?minutes='+selectedMinutes);const data=await r.json();
   if(!r.ok||!data.success)throw new Error(data.error||'Marketplace feed request failed');
-  allCollections=(data.collections||[]).filter(c=>Number(c.salesCount)>0);latestSales=data.sales||[];
+  allCollections=data.collections||[];latestSales=data.sales||[];
   const active=allCollections.filter(c=>Number(c.salesCount)>0);
   $('activeCount').textContent=active.length.toLocaleString();$('salesCount').textContent=latestSales.length.toLocaleString();
   $('volumeSol').textContent=money(active.reduce((sum,c)=>sum+Number(c.volumeSol||0),0));
