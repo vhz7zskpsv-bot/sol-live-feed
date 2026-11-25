@@ -326,10 +326,14 @@ app.get('/api/market/collections', async (req, res) => {
     const directory = directoryResult.status === 'fulfilled' ? directoryResult.value.rows : [];
     const salesData = salesResult.status === 'fulfilled' ? salesResult.value : { sales: [], groups: [] };
     const bySymbol = new Map(directory.map(x => [x.symbol.toLowerCase(), x]));
-    const active = salesData.groups.map(g => {
-      const meta = bySymbol.get(g.symbol.toLowerCase());
-      return { ...(meta || { symbol:g.symbol, name:g.name, image:null, floorPrice:null, listedCount:null, verified:false }),
-        salesCount:g.salesCount, volumeSol:g.volumeSol, lastSale:g.lastSale, marketplace:g.marketplace };
+    // Bitquery Currency.Symbol is the individual NFT's token symbol (e.g. Y00),
+    // not reliably the Magic Eden collection slug (e.g. y00ts). Only promote a
+    // trade group to a collection when its symbol exactly matches the ME directory.
+    const active = salesData.groups.flatMap(g => {
+      const meta = bySymbol.get(String(g.symbol || '').toLowerCase());
+      if (!meta) return [];
+      return [{ ...meta, salesCount:g.salesCount, volumeSol:g.volumeSol,
+        lastSale:g.lastSale, marketplace:g.marketplace }];
     });
     const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
     const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
