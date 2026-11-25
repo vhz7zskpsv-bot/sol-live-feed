@@ -6,6 +6,61 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 8080;
 const API_SH_KEY = process.env.API_SH_KEY;
 const API_SH_BASE = 'https://api.api.sh';
+const BITQUERY_CLIENT_ID = process.env.BITQUERY_CLIENT_ID;
+const BITQUERY_CLIENT_SECRET = process.env.BITQUERY_CLIENT_SECRET;
+const BITQUERY_TOKEN_URL = 'https://oauth2.bitquery.io/oauth2/token';
+const BITQUERY_GRAPHQL_URL = 'https://streaming.bitquery.io/graphql';
+let bitqueryToken = null;
+let bitqueryTokenExpiresAt = 0;
+
+async function getBitqueryToken() {
+  if (bitqueryToken && Date.now() < bitqueryTokenExpiresAt - 60000) return bitqueryToken;
+  if (!BITQUERY_CLIENT_ID || !BITQUERY_CLIENT_SECRET) {
+    const error = new Error('Bitquery client credentials are not configured');
+    error.status = 503;
+    throw error;
+  }
+  const form = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: BITQUERY_CLIENT_ID,
+    client_secret: BITQUERY_CLIENT_SECRET,
+    scope: 'api'
+  });
+  const response = await fetch(BITQUERY_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept': 'application/json' },
+    body: form,
+    signal: AbortSignal.timeout(20000)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.access_token) {
+    const error = new Error(payload.error_description || payload.error || 'Bitquery OAuth token request failed');
+    error.status = response.status || 502;
+    throw error;
+  }
+  bitqueryToken = payload.access_token;
+  bitqueryTokenExpiresAt = Date.now() + (Number(payload.expires_in) || 3600) * 1000;
+  return bitqueryToken;
+}
+
+async function bitqueryGraphql(query) {
+  const token = await getBitqueryToken();
+  const response = await fetch(BITQUERY_GRAPHQL_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'authorization': 'Bearer ' + token, 'accept': 'application/json' },
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(30000)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.errors?.[0]?.message || 'Bitquery GraphQL request failed');
+    error.status = response.status || 502;
+    error.details = payload.errors || undefined;
+    throw error;
+  }
+  return payload;
+}
+
 
 app.use(express.static('public'));
 
@@ -72,6 +127,17 @@ app.get('/api/activities', proxyApiSh('/magiceden/v1/activities',
 app.get('/api/listings', proxyApiSh('/magiceden/v1/listings',
   ['symbol', 'offset', 'limit', 'sort', 'order', 'minPrice', 'maxPrice', 'attributes']));
 
+// Authentication + schema smoke test against Bitquery V2 Solana NFT trade data.
+app.get('/api/bitquery/test', async (req, res) => {
+  const query = 'query { Solana { DEXTradeByTokens(limit: { count: 5 }, where: { Trade: { Currency: { Fungible: false } }, Transaction: { Result: { Success: true } } }) { Trade { Dex { ProtocolName ProtocolFamily } Currency { Symbol MintAddress } Amount Side { Currency { Symbol } Amount } } } } }';
+  try {
+    const payload = await bitqueryGraphql(query);
+    res.json({ success: !payload.errors, provider: 'Bitquery V2', endpoint: BITQUERY_GRAPHQL_URL, authentication: 'OAuth client credentials accepted', data: payload.data || null, errors: payload.errors || null });
+  } catch (error) {
+    console.error('Bitquery test failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success: false, provider: 'Bitquery V2', error: error.message, details: error.details || undefined });
+  }
+});
 app.get('/api/config', (req, res) => {
   res.json({
     provider: 'API.SH / Magic Eden',
@@ -102,6 +168,7 @@ button:active{transform:scale(.98)}pre{white-space:pre-wrap;overflow-wrap:anywhe
 <div id="status" class="status">Checking API.SH configuration…</div></section>
 <div class="actions">
 <input id="symbolInput" value="okay_bears" placeholder="Collection symbol (e.g. okay_bears)" style="min-width:250px;background:#0c1220;border:1px solid #23617b;color:#e8efff;padding:11px;border-radius:9px"><button onclick="loadSales()">Recent sales</button>
+<button onclick="loadData('/api/bitquery/test','Bitquery V2 test')">Test Bitquery V2</button>
 <button onclick="loadData('/api/collections?limit=20','Collections')">Collections</button>
 <button onclick="loadData('/api/listings?symbol=okay_bears&limit=20','Example listings (Okay Bears)')">Example listings</button>
 </div>
