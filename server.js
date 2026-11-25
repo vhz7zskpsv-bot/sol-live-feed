@@ -254,22 +254,35 @@ async function getCollectionDirectory() {
 async function lookupCollectionSymbolFromMint(mint) {
   if (!mint) return null;
   const cached = collectionLookupCache.get(mint);
-  if (cached && Date.now() - cached.at < 3600000) return cached.symbol;
+  if (cached && Date.now() - cached.at < (cached.symbol ? 3600000 : 60000)) return cached.symbol;
   try {
     const raw = await apiShGet('/magiceden/v1/token', { mint });
-    const roots = [raw, raw?.token, raw?.data, raw?.result].filter(Boolean);
+    // API.SH may wrap the upstream token in several response layers. Walk the
+    // complete response, but only accept explicit collection fields (never the
+    // NFT's own ticker/name as a collection slug).
+    const seen = new Set();
+    const queue = [raw];
     let symbol = null;
-    for (const root of roots) {
-      if (root.collection && typeof root.collection === 'object') {
-        symbol = root.collection.symbol || root.collection.collectionSymbol || root.collection.slug || null;
+    while (queue.length && !symbol) {
+      const node = queue.shift();
+      if (!node || typeof node !== 'object' || seen.has(node)) continue;
+      seen.add(node);
+      if (Array.isArray(node)) { queue.push(...node); continue; }
+      const collection = node.collection;
+      if (collection && typeof collection === 'object') {
+        symbol = collection.symbol || collection.collectionSymbol ||
+          collection.collection_symbol || collection.slug || collection.collectionSlug || null;
       }
-      symbol = symbol || root.collectionSymbol || root.collection_symbol || null;
-      if (symbol) break;
+      symbol = symbol || node.collectionSymbol || node.collection_symbol ||
+        node.collectionSlug || node.collection_slug || null;
+      if (!symbol) queue.push(...Object.values(node).filter(x => x && typeof x === 'object'));
     }
+    symbol = typeof symbol === 'string' ? symbol.trim() : null;
     collectionLookupCache.set(mint, { at: Date.now(), symbol });
-    return symbol;
+    return symbol || null;
   } catch (error) {
     console.error('Magic Eden mint-to-collection lookup failed:', error.status || 'network', error.message);
+    collectionLookupCache.set(mint, { at: Date.now(), symbol: null });
     return null;
   }
 }
