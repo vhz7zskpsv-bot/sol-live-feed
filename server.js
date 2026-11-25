@@ -399,6 +399,28 @@ app.get('/api/market/collections', async (req, res) => {
       activeBySymbol.set(key, current);
     }
     const active = [...activeBySymbol.values()];
+    const resolvedGroups = salesData.groups.filter(g => {
+      const meta = bySymbol.get(String(g.resolvedSymbol || '').toLowerCase());
+      return Boolean(meta);
+    }).length;
+    const unresolvedGroups = salesData.groups.filter(g => !bySymbol.has(String(g.resolvedSymbol || '').toLowerCase()))
+      .slice(0, 8).map(g => ({ nftSymbol: g.symbol, sampleMint: g.sampleMint, salesCount: g.salesCount, resolverReturned: g.resolvedSymbol || null }));
+    const salesDiagnostics = {
+      requestedWindowMinutes: minutes,
+      bitqueryRequest: salesResult.status,
+      decodedSales: salesData.sales.length,
+      groupedNftSymbols: salesData.groups.length,
+      groupsResolvedToMagicEdenCollections: resolvedGroups,
+      groupsNotMatchedToDirectory: Math.max(0, salesData.groups.length - resolvedGroups),
+      unresolvedSamples: unresolvedGroups,
+      note: salesResult.status === 'rejected'
+        ? 'Bitquery request failed; decoded sales are unavailable for this window.'
+        : salesData.sales.length === 0
+          ? 'Bitquery returned zero decoded Magic Eden NFT trades in this time window.'
+          : resolvedGroups === 0
+            ? 'Trades were decoded, but none of their NFT mints resolved to a Magic Eden directory collection.'
+            : null
+    };
     const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
     const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
       .map(x => ({ ...x, salesCount:0, volumeSol:0, lastSale:null, marketplace:null }));
@@ -406,7 +428,7 @@ app.get('/api/market/collections', async (req, res) => {
     res.json({ success:true, minutes, collections, activeCollections:active.length,
       directoryCount:directory.length, directoryPages:directoryResult.status === 'fulfilled' ? directoryResult.value.pagesFetched : 0,
       directoryHasMore:directoryResult.status === 'fulfilled' ? directoryResult.value.hasMore : false,
-      sales:salesData.sales, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
+      sales:salesData.sales, salesDiagnostics, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
       limitations:['The collection directory is paged in batches of 500; at most 10,000 entries are loaded per refresh (20 pages) to control API credits.','Sales are attributed only when Magic Eden resolves the NFT mint to a directory collection symbol.'] });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
