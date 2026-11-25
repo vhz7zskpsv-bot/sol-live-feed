@@ -301,9 +301,7 @@ async function getGlobalNftSales(minutes) {
     if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
     groups.set(key, g);
   }
-  // Resolve every NFT mint to its Magic Eden collection, even when Bitquery
-  // omits Currency.CollectionAddress. Many valid trades only carry MintAddress.
-  await Promise.all([...groups.values()].filter(g => g.sampleMint)
+  await Promise.all([...groups.values()].filter(g => g.collectionAddress && g.sampleMint)
     .map(async g => { g.resolvedSymbol = await lookupCollectionSymbolFromMint(g.sampleMint); }));
   const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
   salesCache.set(minutes, { at: Date.now(), data }); return data;
@@ -367,10 +365,10 @@ app.get('/api/market/collections', async (req, res) => {
       return [{ ...meta, salesCount:g.salesCount, volumeSol:g.volumeSol,
         lastSale:g.lastSale, marketplace:g.marketplace }];
     });
-    // Return only collections backed by at least one real sale in this time window.
-    // Never append zero-sale directory entries to the live sales leaderboard.
-    const liveCollections = active.filter(x => Number(x.salesCount) > 0);
-    res.json({ success:true, minutes, collections:liveCollections, activeCollections:liveCollections.length,
+    const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
+    const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
+      .map(x => ({ ...x, salesCount:0, volumeSol:0, lastSale:null, marketplace:null }));
+    res.json({ success:true, minutes, collections:[...active, ...inactive], activeCollections:active.length,
       sales:salesData.sales, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
       limitations:['Tensor trades are not included in the current Bitquery feed.','Only collections present in the API.SH directory have directory artwork and metadata.'] });
   } catch (error) {
