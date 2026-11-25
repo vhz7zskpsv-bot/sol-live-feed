@@ -16,9 +16,14 @@ async function me(pathname) {
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {
     const headers = { accept: 'application/json' };
-    if (API_KEY) headers['Authorization'] = 'Bearer ' + API_KEY;
+    if (API_KEY) headers.Authorization = 'Bearer ' + API_KEY;
     const response = await fetch(ME_BASE + pathname, { headers, signal: controller.signal });
-    if (!response.ok) throw new Error('Magic Eden API returned HTTP ' + response.status);
+    if (!response.ok) {
+      const body = (await response.text()).slice(0, 500);
+      const error = new Error('Magic Eden HTTP ' + response.status + ' at ' + pathname + (body ? ': ' + body : ''));
+      error.status = response.status;
+      throw error;
+    }
     return await response.json();
   } finally {
     clearTimeout(timer);
@@ -34,8 +39,7 @@ function pickTime(a) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 function pickPrice(a) {
-  const raw = a.price ?? a.tokenPrice ?? a.amount ?? a.priceInfo?.solPrice;
-  let n = asNumber(raw);
+  let n = asNumber(a.price ?? a.tokenPrice ?? a.amount ?? a.priceInfo?.solPrice);
   if (a.priceInfo?.solPrice != null) n = asNumber(a.priceInfo.solPrice);
   else if (a.priceLamports != null) n = asNumber(a.priceLamports) / 1e9;
   return n;
@@ -62,8 +66,8 @@ async function buildDashboard() {
   const raw = await me('/collections?offset=0&limit=30');
   const collections = arr(raw);
   const activityResults = await Promise.allSettled(collections.slice(0, 15).map(async c => {
-    const symbol = c.symbol || c.id;
-    if (!symbol) return [];
+    const symbol = c.symbol;
+    if (!symbol || typeof symbol !== 'string') return [];
     const result = await me('/collections/' + encodeURIComponent(symbol) + '/activities?offset=0&limit=100');
     return arr(result).filter(isSale).map(a => normalizeSale(a, c)).filter(s => s.time);
   }));
@@ -105,9 +109,14 @@ app.get('/api/dashboard', async (_req, res) => {
     cache = { at: Date.now(), data, error: null };
     res.json(data);
   } catch (error) {
+    const status = error.status || 0;
     res.status(502).json({
       error: error.message || 'Market data unavailable',
-      hint: 'Live data could not be fetched. Configure MAGIC_EDEN_API_KEY if your API access requires one. No sample trades are shown.',
+      hint: status === 400
+        ? 'Magic Eden rejected the request or collection symbol. This is not proof that an API key is missing.'
+        : (status === 401 || status === 403)
+          ? 'Magic Eden denied access. A valid MAGIC_EDEN_API_KEY may be required.'
+          : 'Live data could not be fetched. No sample trades are shown.',
       updatedAt: new Date().toISOString()
     });
   }
