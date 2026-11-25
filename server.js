@@ -10,6 +10,7 @@ const BITQUERY_CLIENT_ID = process.env.BITQUERY_CLIENT_ID;
 const BITQUERY_CLIENT_SECRET = process.env.BITQUERY_CLIENT_SECRET;
 const BITQUERY_TOKEN_URL = 'https://oauth2.bitquery.io/oauth2/token';
 const BITQUERY_GRAPHQL_URL = 'https://streaming.bitquery.io/graphql';
+const QUICKNODE_RPC_URL = process.env.QUICKNODE_RPC_URL;
 let bitqueryToken = null;
 let bitqueryTokenExpiresAt = 0;
 
@@ -102,6 +103,86 @@ async function apiShGet(path, query = {}) {
 const directoryCache = { at: 0, data: null };
 const salesCache = new Map();
 const listingsCache = new Map();
+const launchCache = { at: 0, data: null };
+
+async function quicknodeRpc(method, params) {
+  if (!QUICKNODE_RPC_URL) {
+    const error = new Error('QUICKNODE_RPC_URL is not configured on this NFT Aggregator service');
+    error.status = 503;
+    throw error;
+  }
+  const response = await fetch(QUICKNODE_RPC_URL, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'nft-launch-scan', method, params }),
+    signal: AbortSignal.timeout(25000)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const error = new Error(payload.error?.message || `QuickNode returned HTTP ${response.status}`);
+    error.status = response.status || 502;
+    throw error;
+  }
+  return payload.result;
+}
+
+async function getRecentSolanaMints() {
+  if (launchCache.data && Date.now() - launchCache.at < 45000) return launchCache.data;
+  if (!QUICKNODE_RPC_URL) return { configured: false, scannedAt: null, assets: [], collections: [], note: 'Add QUICKNODE_RPC_URL to enable Solana mint discovery.' };
+  const interfaces = ['V1_NFT', 'V2_NFT', 'ProgrammableNFT', 'MplCoreAsset'];
+  const batches = await Promise.all(interfaces.map(async assetInterface => {
+    try {
+      const result = await quicknodeRpc('searchAssets', {
+        interface: assetInterface,
+        sortBy: { sortBy: 'created', sortDirection: 'desc' },
+        limit: 40,
+        options: { showCollectionMetadata: true }
+      });
+      return Array.isArray(result?.items) ? result.items : [];
+    } catch (error) {
+      console.error('QuickNode searchAssets failed for', assetInterface, error.status || 'network', error.message);
+      return [];
+    }
+  }));
+  const seen = new Set();
+  const assets = batches.flat().filter(asset => {
+    const id = asset?.id;
+    if (!id || seen.has(id)) return false;
+    seen.add(id); return true;
+  }).map(asset => {
+    const metadata = asset.content?.metadata || {};
+    const file = (asset.content?.files || []).find(x => x.mime?.startsWith('image/')) || (asset.content?.files || [])[0];
+    const collection = (asset.grouping || []).find(x => x.group_key === 'collection');
+    const creators = (asset.creators || []).map(x => x.address).filter(Boolean);
+    return {
+      id: asset.id, name: metadata.name || 'Unnamed NFT', symbol: metadata.symbol || '',
+      image: file?.uri || null, interface: asset.interface || 'NFT',
+      collectionAddress: collection?.group_value || null,
+      collectionName: collection?.collection_metadata?.name || collection?.name || null,
+      collectionImage: collection?.collection_metadata?.image || null,
+      verified: Boolean(collection?.verified), creators,
+      createdAt: asset.created_at || asset.createdAt || null,
+      printCurrentSupply: asset.supply?.print_current_supply ?? null,
+      printMaxSupply: asset.supply?.print_max_supply ?? null,
+      mint: asset.id
+    };
+  }).sort((a,b) => (new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
+  const grouped = new Map();
+  for (const asset of assets) {
+    const key = asset.collectionAddress || 'unverified:' + (asset.creators[0] || asset.id);
+    const group = grouped.get(key) || {
+      id: key, name: asset.collectionName || (asset.collectionAddress ? 'Unverified collection' : 'Unverified / ungrouped mints'),
+      image: asset.collectionImage || asset.image, collectionAddress: asset.collectionAddress,
+      verified: asset.verified, observedMints: 0, latestMintAt: asset.createdAt,
+      sampleAssets: [], supply: null, supplySource: 'Not reported by asset indexer'
+    };
+    group.observedMints++;
+    if (asset.createdAt && (!group.latestMintAt || new Date(asset.createdAt) > new Date(group.latestMintAt))) group.latestMintAt = asset.createdAt;
+    if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
+    grouped.set(key, group);
+  }
+  const data = { configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections: [...grouped.values()].sort((a,b) => new Date(b.latestMintAt || 0) - new Date(a.latestMintAt || 0)), note: 'Recent indexed NFT assets. Observed mints are scan results, not total collection supply.' };
+  launchCache.at = Date.now(); launchCache.data = data; return data;
+}
 
 function findArray(value, predicate, depth = 0) {
   if (!value || depth > 5) return [];
