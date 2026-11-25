@@ -180,7 +180,14 @@ async function getRecentSolanaMints() {
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
   }
-  const data = { configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections: [...grouped.values()].sort((a,b) => new Date(b.latestMintAt || 0) - new Date(a.latestMintAt || 0)), note: 'Recent indexed NFT assets. Observed mints are scan results, not total collection supply.' };
+  const collections = [...grouped.values()].sort((a,b) => new Date(b.latestMintAt || 0) - new Date(a.latestMintAt || 0));
+  await Promise.all(collections.filter(x => x.collectionAddress).slice(0, 20).map(async group => {
+    try {
+      const result = await quicknodeRpc('getAssetsByGroup', { groupKey: 'collection', groupValue: group.collectionAddress, limit: 1, options: { showCollectionMetadata: true } });
+      if (Number.isFinite(Number(result?.total))) group.mintedCount = Number(result.total);
+    } catch (error) { console.error('QuickNode collection count failed:', error.status || 'network', error.message); }
+  }));
+  const data = { configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections, note: 'Minted count is indexed assets in each collection. Maximum supply is shown only when the launch program exposes it; otherwise it is not disclosed.' };
   launchCache.at = Date.now(); launchCache.data = data; return data;
 }
 
