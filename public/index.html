@@ -66,15 +66,17 @@ async function openCollection(symbol){
  try{
   const r=await fetch('/api/market/collection/'+encodeURIComponent(symbol)+'/listings');const data=await r.json();
   if(!r.ok||!data.success)throw new Error(data.error||'Listings request failed');
-  const items=arrFrom(data.data,['listings','results','items','tokens','data'],x=>x&&typeof x==='object'&&(x.listPrice!==undefined||x.price!==undefined||x.tokenMint||x.mint||x.mintAddress));
-  $('listingCount').textContent=items.length+' returned · API.SH';
+  const items=Array.isArray(data.items)?data.items:arrFrom(data.data,['listings','items','results','tokens','data','records','nfts','assets'],x=>x&&typeof x==='object');
+  $('listingCount').textContent=items.length+' returned · API.SH'+(data.credits_used!==null&&data.credits_used!==undefined?' · '+data.credits_used+' credit':'');
   $('listings').innerHTML=items.length?items.map(item=>{
-   const image=item.image||item.imageUrl||item.imageURI||item.img||null;
-   const name=item.name||item.title||short(item.tokenMint||item.mint||item.mintAddress||'NFT');
-   const price=item.listPrice??item.price??item.priceSol;
-   const mint=item.tokenMint||item.mint||item.mintAddress||item.id||'';
+   const nft=item.token||item.nft||item.item||item.asset||item;
+   const image=nft.image||nft.imageUrl||nft.imageURL||nft.imageURI||nft.img||nft.thumbnail||item.image||item.imageUrl||null;
+   const mint=nft.tokenMint||nft.mint||nft.mintAddress||nft.tokenAddress||nft.id||item.tokenMint||item.mint||item.mintAddress||item.id||'';
+   const name=nft.name||nft.title||item.name||item.title||short(mint||'NFT');
+   const price=item.listPrice??item.price??item.priceSol??item.amount??nft.listPrice??nft.price??nft.priceSol??'—';
+   const currency=item.currency||item.paymentSymbol||item.priceCurrency||nft.currency||'SOL';
    return '<article class="listing">'+(image?'<img src="'+escapeHtml(image)+'" alt="" loading="lazy">':'<div style="aspect-ratio:1;background:#111d2d;display:grid;place-items:center;color:#65e6ff">NFT</div>')+'<div class="listingBody"><div class="listingName">'+escapeHtml(name)+'</div><div class="listingPrice">'+money(price)+' SOL</div><div class="listingMint">'+escapeHtml(mint)+'</div></div></article>'
-  }).join(''):'<div class="empty">API.SH returned no parseable active listing items for this collection. No placeholder listings are shown.</div>';
+  }).join(''):'<div class="empty">API.SH returned no listing records for this collection. No placeholder listings are shown.</div>';
  }catch(e){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
 }
 $('search').addEventListener('input',renderCollections);$('refresh').addEventListener('click',loadMarket);$('closeDetail').addEventListener('click',()=>$('detail').classList.add('hidden'));
