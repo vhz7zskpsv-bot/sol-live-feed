@@ -118,6 +118,30 @@ function findArray(value, predicate, depth = 0) {
   }
   return [];
 }
+
+function isListingRecord(x) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return false;
+  const keys = Object.keys(x).join(' ').toLowerCase();
+  const nested = x.token || x.nft || x.item || x.asset;
+  return /mint|price|token|listing|seller|image|rarity|name/.test(keys) ||
+    (nested && typeof nested === 'object');
+}
+function findListingRows(value, depth = 0) {
+  if (!value || depth > 7) return [];
+  if (Array.isArray(value)) {
+    if (value.length && value.some(isListingRecord)) return value.filter(x => x && typeof x === 'object');
+    for (const item of value) { const rows = findListingRows(item, depth + 1); if (rows.length) return rows; }
+    return [];
+  }
+  if (typeof value === 'object') {
+    for (const key of ['listings','items','results','tokens','data','records','nfts','assets']) {
+      if (key in value) { const rows = findListingRows(value[key], depth + 1); if (rows.length) return rows; }
+    }
+    for (const child of Object.values(value)) { const rows = findListingRows(child, depth + 1); if (rows.length) return rows; }
+  }
+  return [];
+}
+
 function normalizeCollection(x) {
   const symbol = x.symbol || x.collectionSymbol || x.collection_symbol || x.id || '';
   return { symbol: String(symbol), name: x.name || x.title || x.collectionName || String(symbol),
@@ -231,7 +255,9 @@ app.get('/api/market/collection/:symbol/listings', async (req, res) => {
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
     const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:50, sort:'listPrice', order:'asc' });
-    const result = { success:true, symbol, source:'API.SH / Magic Eden', data };
+    const items = findListingRows(data);
+    const result = { success:true, symbol, source:'API.SH / Magic Eden', count:items.length,
+      credits_used:data?.credits_used ?? data?.meta?.credits_used ?? null, items, data };
     listingsCache.set(key, { at:Date.now(), data:result }); res.json(result);
   } catch (error) {
     console.error('Magic Eden listings failed:', error.status || 'network', error.message);
