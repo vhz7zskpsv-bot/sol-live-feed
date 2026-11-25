@@ -358,6 +358,20 @@ app.get('/api/market/collection/:symbol/listings', async (req, res) => {
   }
 });
 
+app.get('/api/launches/recent', async (req, res) => {
+  try {
+    const data = await getRecentSolanaMints();
+    res.json({ success: true, ...data });
+  } catch (error) {
+    console.error('QuickNode launch discovery failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({
+      success: false,
+      source: 'QuickNode Metaplex DAS',
+      error: error.message
+    });
+  }
+});
+
 app.get('/api/config', (req, res) => {
   res.json({
     provider: 'API.SH / Magic Eden',
