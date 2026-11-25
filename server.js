@@ -114,8 +114,9 @@ app.get('/api/collections/:symbol/listings', async (req, res) => {
     if (!symbol || symbol.length > 100) return res.status(400).json({ error: 'Invalid collection symbol' });
     const limit = Math.min(40, Math.max(1, Number(req.query.limit) || 20));
     const offset = Math.max(0, Number(req.query.offset) || 0);
-    const result = await me('/collections/' + encodeURIComponent(symbol) + '/listings?offset=' + offset + '&limit=' + limit + '&sort=listPrice&sort_direction=asc&listingAggMode=true');
-    const listings = arr(result).map(item => {
+    const result = await me('/collections/' + encodeURIComponent(symbol) + '/listings?offset=' + offset + '&limit=' + limit + '&sort=listPrice&sort_direction=asc&listingAggMode=false');
+    const listingRows = Array.isArray(result) ? result : arr(result);
+    const listings = listingRows.map(item => {
       const token = item.token || item;
       const mint = item.tokenMint || item.mint || item.tokenAddress || token.mint || token.tokenMint || '';
       const rawPrice = item.price ?? item.listPrice ?? item.priceInfo?.solPrice ?? token.price ?? 0;
