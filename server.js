@@ -246,10 +246,31 @@ function normalizeCollection(x) {
     verified: x.isVerified ?? x.verified ?? false, raw: x };
 }
 async function getCollectionDirectory() {
-  if (directoryCache.data && Date.now() - directoryCache.at < 60000) return directoryCache.data;
-  const raw = await apiShGet('/magiceden/v1/collections', { offset: 0, limit: 100 });
-  const rows = findArray(raw, x => x.symbol || x.collectionSymbol || x.collection_symbol).map(normalizeCollection).filter(x => x.symbol);
-  directoryCache.at = Date.now(); directoryCache.data = { rows, raw }; return directoryCache.data;
+  if (directoryCache.data && Date.now() - directoryCache.at < 300000) return directoryCache.data;
+  const rows = [];
+  const seen = new Set();
+  let page = 1;
+  let nextPage = 1;
+  let pagesFetched = 0;
+  while (nextPage && pagesFetched < 10) {
+    const raw = await apiShGet('/magiceden/v1/collections', { page, limit: 500 });
+    const items = findArray(raw, x => x.symbol || x.collectionSymbol || x.collection_symbol);
+    for (const item of items) {
+      const normalized = normalizeCollection(item);
+      if (normalized.symbol && !seen.has(normalized.symbol.toLowerCase())) {
+        seen.add(normalized.symbol.toLowerCase());
+        rows.push(normalized);
+      }
+    }
+    pagesFetched++;
+    const advertisedNext = raw?.next_page ?? raw?.data?.next_page ?? raw?.result?.next_page ?? null;
+    nextPage = advertisedNext ? Number(advertisedNext) : null;
+    if (nextPage && (!Number.isFinite(nextPage) || nextPage <= page)) nextPage = null;
+    if (nextPage) page = nextPage;
+  }
+  const data = { rows, pagesFetched, hasMore: Boolean(nextPage), count: rows.length };
+  directoryCache.at = Date.now(); directoryCache.data = data;
+  return data;
 }
 async function lookupCollectionSymbolFromMint(mint) {
   if (!mint) return null;
@@ -260,7 +281,8 @@ async function lookupCollectionSymbolFromMint(mint) {
     const roots = [raw, raw?.token, raw?.data, raw?.result].filter(Boolean);
     let symbol = null;
     for (const root of roots) {
-      if (root.collection && typeof root.collection === 'object') {
+      if (typeof root.collection === 'string') symbol = root.collection;
+      else if (root.collection && typeof root.collection === 'object') {
         symbol = root.collection.symbol || root.collection.collectionSymbol || root.collection.slug || null;
       }
       symbol = symbol || root.collectionSymbol || root.collection_symbol || null;
@@ -330,7 +352,7 @@ function proxyApiSh(path, allowedParams) {
 
 // Read-only Magic Eden data through API.SH. Each successful upstream call costs 1 credit.
 app.get('/api/collections', proxyApiSh('/magiceden/v1/collections',
-  ['offset', 'limit', 'sort', 'order']));
+  ['page', 'limit']));
 app.get('/api/activities', proxyApiSh('/magiceden/v1/activities',
   ['symbol', 'type', 'limit', 'page']));
 app.get('/api/listings', proxyApiSh('/magiceden/v1/listings',
@@ -358,19 +380,28 @@ app.get('/api/market/collections', async (req, res) => {
     // Bitquery Currency.Symbol is the individual NFT's token symbol (e.g. Y00),
     // not reliably the Magic Eden collection slug (e.g. y00ts). Only promote a
     // trade group to a collection when its symbol exactly matches the ME directory.
-    const active = salesData.groups.flatMap(g => {
-      const resolved = g.resolvedSymbol || g.symbol;
-      const meta = bySymbol.get(String(resolved || '').toLowerCase());
-      if (!meta) return [];
-      return [{ ...meta, salesCount:g.salesCount, volumeSol:g.volumeSol,
-        lastSale:g.lastSale, marketplace:g.marketplace }];
-    });
+    const activeBySymbol = new Map();
+    for (const g of salesData.groups) {
+      const resolved = g.resolvedSymbol || '';
+      const meta = bySymbol.get(String(resolved).toLowerCase());
+      if (!meta) continue;
+      const key = meta.symbol.toLowerCase();
+      const current = activeBySymbol.get(key) || { ...meta, salesCount:0, volumeSol:0, lastSale:null, marketplace:'Magic Eden' };
+      current.salesCount += Number(g.salesCount || 0);
+      current.volumeSol += Number(g.volumeSol || 0);
+      if (g.lastSale && (!current.lastSale || new Date(g.lastSale) > new Date(current.lastSale))) current.lastSale = g.lastSale;
+      activeBySymbol.set(key, current);
+    }
+    const active = [...activeBySymbol.values()];
     const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
     const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
       .map(x => ({ ...x, salesCount:0, volumeSol:0, lastSale:null, marketplace:null }));
-    res.json({ success:true, minutes, collections:[...active, ...inactive], activeCollections:active.length,
+    const collections = [...active, ...inactive].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol || a.name.localeCompare(b.name));
+    res.json({ success:true, minutes, collections, activeCollections:active.length,
+      directoryCount:directory.length, directoryPages:directoryResult.status === 'fulfilled' ? directoryResult.value.pagesFetched : 0,
+      directoryHasMore:directoryResult.status === 'fulfilled' ? directoryResult.value.hasMore : false,
       sales:salesData.sales, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
-      limitations:['Tensor trades are not included in the current Bitquery feed.','Only collections present in the API.SH directory have directory artwork and metadata.'] });
+      limitations:['The collection directory is paged in batches of 500; at most 5,000 entries are loaded per refresh to control API credits.','Sales are attributed only when Magic Eden resolves the NFT mint to a directory collection symbol.'] });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
     res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
