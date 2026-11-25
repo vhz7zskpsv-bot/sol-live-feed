@@ -102,6 +102,7 @@ async function apiShGet(path, query = {}) {
 
 const directoryCache = { at: 0, data: null };
 const salesCache = new Map();
+const collectionLookupCache = new Map();
 const listingsCache = new Map();
 const activitiesCache = new Map();
 const launchCache = { at: 0, data: null };
@@ -250,30 +251,58 @@ async function getCollectionDirectory() {
   const rows = findArray(raw, x => x.symbol || x.collectionSymbol || x.collection_symbol).map(normalizeCollection).filter(x => x.symbol);
   directoryCache.at = Date.now(); directoryCache.data = { rows, raw }; return directoryCache.data;
 }
+async function lookupCollectionSymbolFromMint(mint) {
+  if (!mint) return null;
+  const cached = collectionLookupCache.get(mint);
+  if (cached && Date.now() - cached.at < 3600000) return cached.symbol;
+  try {
+    const raw = await apiShGet('/magiceden/v1/token', { mint });
+    const roots = [raw, raw?.token, raw?.data, raw?.result].filter(Boolean);
+    let symbol = null;
+    for (const root of roots) {
+      if (root.collection && typeof root.collection === 'object') {
+        symbol = root.collection.symbol || root.collection.collectionSymbol || root.collection.slug || null;
+      }
+      symbol = symbol || root.collectionSymbol || root.collection_symbol || null;
+      if (symbol) break;
+    }
+    collectionLookupCache.set(mint, { at: Date.now(), symbol });
+    return symbol;
+  } catch (error) {
+    console.error('Magic Eden mint-to-collection lookup failed:', error.status || 'network', error.message);
+    return null;
+  }
+}
+
 async function getGlobalNftSales(minutes) {
   const old = salesCache.get(minutes);
   if (old && Date.now() - old.at < 10000) return old.data;
   const since = new Date(Date.now() - minutes * 60000).toISOString();
-  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress } Amount Side { Amount Currency { Symbol } } } } } }';
+  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress CollectionAddress } Amount Side { Amount Currency { Symbol } } } } } }';
   const payload = await bitqueryGraphql(query);
   if (payload.errors?.length) { const e = new Error(payload.errors[0].message); e.details = payload.errors; throw e; }
   const sales = (payload.data?.Solana?.DEXTradeByTokens || []).map(row => {
     const t = row.Trade || {};
     return { time: row.Block?.Time || null, signature: row.Transaction?.Signature || null,
       symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Name || t.Currency?.Symbol || 'Unknown',
-      mint: t.Currency?.MintAddress || null, nftAmount: t.Amount ?? null,
-      price: t.Side?.Amount ?? null, priceCurrency: t.Side?.Currency?.Symbol || null,
+      mint: t.Currency?.MintAddress || null, collectionAddress: t.Currency?.CollectionAddress || null,
+      nftAmount: t.Amount ?? null, price: t.Side?.Amount ?? null,
+      priceCurrency: t.Side?.Currency?.Symbol || null,
       marketplace: t.Dex?.ProtocolName || t.Dex?.ProtocolFamily || 'Magic Eden' };
   });
   const groups = new Map();
   for (const sale of sales) {
-    const key = sale.symbol;
-    const g = groups.get(key) || { symbol: key, name: sale.name, salesCount: 0, volumeSol: 0, lastSale: sale.time, marketplace: sale.marketplace };
+    const key = sale.collectionAddress || sale.symbol;
+    const g = groups.get(key) || { key, collectionAddress: sale.collectionAddress, sampleMint: sale.mint,
+      symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
+      lastSale: sale.time, marketplace: sale.marketplace };
     g.salesCount++;
     if (sale.priceCurrency === 'SOL' && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
     if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
     groups.set(key, g);
   }
+  await Promise.all([...groups.values()].filter(g => g.collectionAddress && g.sampleMint)
+    .map(async g => { g.resolvedSymbol = await lookupCollectionSymbolFromMint(g.sampleMint); }));
   const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
   salesCache.set(minutes, { at: Date.now(), data }); return data;
 }
@@ -330,7 +359,8 @@ app.get('/api/market/collections', async (req, res) => {
     // not reliably the Magic Eden collection slug (e.g. y00ts). Only promote a
     // trade group to a collection when its symbol exactly matches the ME directory.
     const active = salesData.groups.flatMap(g => {
-      const meta = bySymbol.get(String(g.symbol || '').toLowerCase());
+      const resolved = g.resolvedSymbol || g.symbol;
+      const meta = bySymbol.get(String(resolved || '').toLowerCase());
       if (!meta) return [];
       return [{ ...meta, salesCount:g.salesCount, volumeSol:g.volumeSol,
         lastSale:g.lastSale, marketplace:g.marketplace }];
