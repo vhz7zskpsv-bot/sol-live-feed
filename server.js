@@ -246,13 +246,13 @@ function normalizeCollection(x) {
     verified: x.isVerified ?? x.verified ?? false, raw: x };
 }
 async function getCollectionDirectory() {
-  if (directoryCache.data && Date.now() - directoryCache.at < 300000) return directoryCache.data;
+  if (directoryCache.data && Date.now() - directoryCache.at < 900000) return directoryCache.data;
   const rows = [];
   const seen = new Set();
   let page = 1;
   let nextPage = 1;
   let pagesFetched = 0;
-  while (nextPage && pagesFetched < 10) {
+  while (nextPage && pagesFetched < 20) {
     const raw = await apiShGet('/magiceden/v1/collections', { page, limit: 500 });
     const items = findArray(raw, x => x.symbol || x.collectionSymbol || x.collection_symbol);
     for (const item of items) {
@@ -300,7 +300,7 @@ async function getGlobalNftSales(minutes) {
   const old = salesCache.get(minutes);
   if (old && Date.now() - old.at < 10000) return old.data;
   const since = new Date(Date.now() - minutes * 60000).toISOString();
-  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress CollectionAddress } Amount Side { Amount Currency { Symbol } } } } } }';
+  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress CollectionAddress } Amount Side { Amount Currency { Symbol MintAddress } } } } } }';
   const payload = await bitqueryGraphql(query);
   if (payload.errors?.length) { const e = new Error(payload.errors[0].message); e.details = payload.errors; throw e; }
   const sales = (payload.data?.Solana?.DEXTradeByTokens || []).map(row => {
@@ -309,7 +309,7 @@ async function getGlobalNftSales(minutes) {
       symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Name || t.Currency?.Symbol || 'Unknown',
       mint: t.Currency?.MintAddress || null, collectionAddress: t.Currency?.CollectionAddress || null,
       nftAmount: t.Amount ?? null, price: t.Side?.Amount ?? null,
-      priceCurrency: t.Side?.Currency?.Symbol || null,
+      priceCurrency: t.Side?.Currency?.Symbol || null, priceCurrencyMint: t.Side?.Currency?.MintAddress || null,
       marketplace: t.Dex?.ProtocolName || t.Dex?.ProtocolFamily || 'Magic Eden' };
   });
   const groups = new Map();
@@ -319,7 +319,7 @@ async function getGlobalNftSales(minutes) {
       symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
       lastSale: sale.time, marketplace: sale.marketplace };
     g.salesCount++;
-    if (sale.priceCurrency === 'SOL' && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
+    if ((['SOL','WSOL'].includes(String(sale.priceCurrency || '').toUpperCase()) || sale.priceCurrencyMint === 'So11111111111111111111111111111111111111112') && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
     if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
     groups.set(key, g);
   }
@@ -407,7 +407,7 @@ app.get('/api/market/collections', async (req, res) => {
       directoryCount:directory.length, directoryPages:directoryResult.status === 'fulfilled' ? directoryResult.value.pagesFetched : 0,
       directoryHasMore:directoryResult.status === 'fulfilled' ? directoryResult.value.hasMore : false,
       sales:salesData.sales, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
-      limitations:['The collection directory is paged in batches of 500; at most 5,000 entries are loaded per refresh to control API credits.','Sales are attributed only when Magic Eden resolves the NFT mint to a directory collection symbol.'] });
+      limitations:['The collection directory is paged in batches of 500; at most 10,000 entries are loaded per refresh (20 pages) to control API credits.','Sales are attributed only when Magic Eden resolves the NFT mint to a directory collection symbol.'] });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
     res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
