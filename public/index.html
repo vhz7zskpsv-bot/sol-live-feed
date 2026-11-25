@@ -54,7 +54,7 @@ async function loadMarket(){
   $('volumeSol').textContent=money(active.reduce((sum,c)=>sum+Number(c.volumeSol||0),0));
   $('saleWindow').textContent='Last '+(selectedMinutes===1440?'24h':selectedMinutes+'m');
   renderCollections();renderSales();
-  const note=(data.limitations||[]).join(' ');$('allNotice').textContent=note;$('allNotice').classList.toggle('hidden',!note);
+  const errs=Object.entries(data.providerErrors||{}).filter(x=>x[1]).map(x=>x[0]+': '+x[1]);const note=[...(data.limitations||[]),...(errs.length?['Provider issue — '+errs.join(' | ')]:[])].join(' ');$('allNotice').textContent=note;$('allNotice').classList.toggle('hidden',!note);
  }catch(e){$('collections').innerHTML='<div class="empty">Could not load marketplace data: '+escapeHtml(e.message)+'</div>';$('salesFeed').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>';$('activeCount').textContent='—';$('salesCount').textContent='—';$('volumeSol').textContent='—'}
 }
 async function openCollection(symbol){
