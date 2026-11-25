@@ -65,7 +65,7 @@ async function buildDashboard() {
     const symbol = c.symbol || c.id;
     if (!symbol) return [];
     const result = await me('/collections/' + encodeURIComponent(symbol) + '/activities?offset=0&limit=100');
-    return arr(result).map(a => normalizeSale(a, c)).filter(s => s.time && isSale(a));
+    return arr(result).filter(isSale).map(a => normalizeSale(a, c)).filter(s => s.time);
   }));
   const sales = activityResults.flatMap(r => r.status === 'fulfilled' ? r.value : []);
   sales.sort((a, b) => b.time - a.time);
