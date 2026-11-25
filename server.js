@@ -68,7 +68,7 @@ function proxyApiSh(path, allowedParams) {
 app.get('/api/collections', proxyApiSh('/magiceden/v1/collections',
   ['offset', 'limit', 'sort', 'order']));
 app.get('/api/activities', proxyApiSh('/magiceden/v1/activities',
-  ['symbol', 'type', 'offset', 'limit', 'sort', 'order']));
+  ['symbol', 'type', 'limit', 'page']));
 app.get('/api/listings', proxyApiSh('/magiceden/v1/listings',
   ['symbol', 'offset', 'limit', 'sort', 'order', 'minPrice', 'maxPrice', 'attributes']));
 
@@ -101,7 +101,7 @@ button:active{transform:scale(.98)}pre{white-space:pre-wrap;overflow-wrap:anywhe
 <div class="muted">Read-only Magic Eden public data via API.SH · No wallet connection · No Helius dependency</div>
 <div id="status" class="status">Checking API.SH configuration…</div></section>
 <div class="actions">
-<button onclick="loadData('/api/activities?type=buyNow&limit=100','Recent sales')">Recent sales</button>
+<input id="symbolInput" value="okay_bears" placeholder="Collection symbol (e.g. okay_bears)" style="min-width:250px;background:#0c1220;border:1px solid #23617b;color:#e8efff;padding:11px;border-radius:9px"><button onclick="loadSales()">Recent sales</button>
 <button onclick="loadData('/api/collections?limit=20','Collections')">Collections</button>
 <button onclick="loadData('/api/listings?symbol=okay_bears&limit=20','Example listings (Okay Bears)')">Example listings</button>
 </div>
@@ -112,6 +112,7 @@ fetch('/api/config').then(r=>r.json()).then(x=>{
  statusEl.textContent=x.configured?'API.SH key detected. Ready to request live marketplace data.':'API_SH_KEY is missing from Railway Variables.';
  if(!x.configured)statusEl.className='warning';
 }).catch(()=>{statusEl.textContent='Could not read service configuration';statusEl.className='warning'});
+function loadSales(){const symbol=document.getElementById('symbolInput').value.trim();if(!symbol){statusEl.textContent='Enter a collection symbol first.';return;}loadData('/api/activities?symbol='+encodeURIComponent(symbol)+'&type=buyNow&limit=100','Recent sales · '+symbol);}
 async function loadData(path,label){
  const out=document.getElementById('output');out.textContent='Loading '+label+'…';
  try{const r=await fetch(path);const data=await r.json();out.textContent=JSON.stringify(data,null,2);
