@@ -23,7 +23,7 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 <div class="footer">Read-only public data · No wallet connection · No transactions · No synthetic sales or listing records</div>
 </main>
 <script>
-let selectedMinutes=15, allCollections=[], latestSales=[];
+let selectedMinutes=15, allCollections=[], latestSales=[], marketRequest=null, marketLoaded=false;
 const $=id=>document.getElementById(id);
 function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function short(v){if(!v)return '—';const s=String(v);return s.length>13?s.slice(0,5)+'…'+s.slice(-5):s}
@@ -81,5 +81,5 @@ async function openCollection(symbol){
 }
 $('search').addEventListener('input',renderCollections);$('refresh').addEventListener('click',loadMarket);$('closeDetail').addEventListener('click',()=>$('detail').classList.add('hidden'));
 document.querySelectorAll('[data-min]').forEach(btn=>btn.addEventListener('click',()=>{selectedMinutes=Number(btn.dataset.min);document.querySelectorAll('[data-min]').forEach(x=>x.classList.toggle('active',x===btn));loadMarket()}));
-loadMarket();setInterval(loadMarket,30000);
+loadMarket();setInterval(()=>{if(!document.hidden)loadMarket({silent:true})},60000);
 </script></body></html>
