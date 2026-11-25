@@ -46,8 +46,13 @@ function pickPrice(a) {
   return n;
 }
 function isSale(a) {
-  const type = String(a.type || a.txType || a.activityType || a.eventType || a.event || '').toLowerCase().replace(/[\\s_-]/g, '');
-  return ['buynow', 'sale', 'acceptbid', 'purchase', 'sold'].some(x => type.includes(x));
+  // Count only explicit sale event types with an on-chain transaction signature and a real price/time.
+  const type = String(a.type || a.txType || a.activityType || a.eventType || '').toLowerCase().replace(/[\\s_-]/g, '');
+  const signature = a.signature || a.txSignature || a.txid || '';
+  const allowed = new Set(['buynow', 'acceptbid', 'sale', 'purchase', 'sold']);
+  const time = pickTime(a);
+  const price = pickPrice(a);
+  return allowed.has(type) && Boolean(signature) && Boolean(time) && price > 0;
 }
 function normalizeSale(a, collection) {
   return {
@@ -93,8 +98,8 @@ async function buildDashboard() {
     const ownSales = sales.filter(s => s.symbol === (c.symbol || '') && now - s.time <= 3600000 && now >= s.time);
     return {
       name: c.name || c.symbol || 'Unknown', symbol: c.symbol || '',
-      floor: asNumber(c.floorPrice), volume24h: asNumber(c.volume24hr ?? c.volume24h),
-      listed: asNumber(c.listedCount), image: c.image || c.imageURL || c.img || '',
+      floor: asNullableNumber(c.floorPrice), volume24h: asNullableNumber(c.volume24hr ?? c.volume24h),
+      listed: asNullableNumber(c.listedCount), image: c.image || c.imageURL || c.img || '',
       sales1h: ownSales.length, lastSaleAt: ownSales[0]?.time || 0
     };
   }).sort((a, b) => b.sales1h - a.sales1h || b.lastSaleAt - a.lastSaleAt || b.volume24h - a.volume24h).slice(0, 20);
