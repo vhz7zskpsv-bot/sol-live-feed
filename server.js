@@ -63,7 +63,7 @@ function normalizeSale(a, collection) {
 }
 
 async function buildDashboard() {
-  const raw = await me('/collections?offset=0&limit=30');
+  const raw = await me('/collections?offset=0&limit=20');
   const collections = arr(raw);
   const activityResults = await Promise.allSettled(collections.slice(0, 15).map(async c => {
     const symbol = c.symbol;
