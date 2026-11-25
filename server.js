@@ -365,10 +365,10 @@ app.get('/api/market/collections', async (req, res) => {
       return [{ ...meta, salesCount:g.salesCount, volumeSol:g.volumeSol,
         lastSale:g.lastSale, marketplace:g.marketplace }];
     });
-    const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
-    const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
-      .map(x => ({ ...x, salesCount:0, volumeSol:0, lastSale:null, marketplace:null }));
-    res.json({ success:true, minutes, collections:[...active, ...inactive], activeCollections:active.length,
+    // Return only collections backed by at least one real sale in this time window.
+    // Never append zero-sale directory entries to the live sales leaderboard.
+    const liveCollections = active.filter(x => Number(x.salesCount) > 0);
+    res.json({ success:true, minutes, collections:liveCollections, activeCollections:liveCollections.length,
       sales:salesData.sales, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
       limitations:['Tensor trades are not included in the current Bitquery feed.','Only collections present in the API.SH directory have directory artwork and metadata.'] });
   } catch (error) {
