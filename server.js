@@ -259,7 +259,7 @@ app.get('/api/market/collection/:symbol/listings', async (req, res) => {
   const key = symbol.toLowerCase(), cached = listingsCache.get(key);
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
-    const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:50, sort:'listPrice', order:'asc', sort_direction:'asc' });
+    const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:40, sort:'listPrice', order:'asc', sort_direction:'asc' });
     const items = findListingRows(data);
     const result = { success:true, symbol, source:'API.SH / Magic Eden', count:items.length,
       credits_used:data?.credits_used ?? data?.meta?.credits_used ?? null, items, data };
