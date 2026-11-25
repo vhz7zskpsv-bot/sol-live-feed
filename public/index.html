@@ -75,7 +75,7 @@ async function openCollection(symbol){
    const name=nft.name||nft.title||item.name||item.title||short(mint||'NFT');
    const price=item.listPrice??item.price??item.priceSol??item.amount??nft.listPrice??nft.price??nft.priceSol??'—';
    const currency=item.currency||item.paymentSymbol||item.priceCurrency||nft.currency||'SOL';
-   return '<article class="listing">'+(image?'<img src="'+escapeHtml(image)+'" alt="" loading="lazy">':'<div style="aspect-ratio:1;background:#111d2d;display:grid;place-items:center;color:#65e6ff">NFT</div>')+'<div class="listingBody"><div class="listingName">'+escapeHtml(name)+'</div><div class="listingPrice">'+money(price)+' SOL</div><div class="listingMint">'+escapeHtml(mint)+'</div></div></article>'
+   return '<article class="listing">'+(image?'<img src="'+escapeHtml(image)+'" alt="" loading="lazy">':'<div style="aspect-ratio:1;background:#111d2d;display:grid;place-items:center;color:#65e6ff">NFT</div>')+'<div class="listingBody"><div class="listingName">'+escapeHtml(name)+'</div><div class="listingPrice">'+money(price)+' '+escapeHtml(currency)+'</div><div class="listingMint">'+escapeHtml(mint)+'</div></div></article>'
   }).join(''):'<div class="empty">API.SH returned no listing records for this collection. No placeholder listings are shown.</div>';
  }catch(e){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
 }
