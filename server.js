@@ -165,13 +165,13 @@ async function getGlobalNftSales(minutes) {
   const old = salesCache.get(minutes);
   if (old && Date.now() - old.at < 10000) return old.data;
   const since = new Date(Date.now() - minutes * 60000).toISOString();
-  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Symbol MintAddress } Amount Side { Amount Currency { Symbol } } } } } }';
+  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress } Amount Side { Amount Currency { Symbol } } } } } }';
   const payload = await bitqueryGraphql(query);
   if (payload.errors?.length) { const e = new Error(payload.errors[0].message); e.details = payload.errors; throw e; }
   const sales = (payload.data?.Solana?.DEXTradeByTokens || []).map(row => {
     const t = row.Trade || {};
     return { time: row.Block?.Time || null, signature: row.Transaction?.Signature || null,
-      symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Symbol || 'Unknown',
+      symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Name || t.Currency?.Symbol || 'Unknown',
       mint: t.Currency?.MintAddress || null, nftAmount: t.Amount ?? null,
       price: t.Side?.Amount ?? null, priceCurrency: t.Side?.Currency?.Symbol || null,
       marketplace: t.Dex?.ProtocolName || t.Dex?.ProtocolFamily || 'Magic Eden' };
