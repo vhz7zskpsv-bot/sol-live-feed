@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Solana NFT Market Pulse</title>
+<style>
+:root{color-scheme:dark;--bg:#070b13;--panel:#0d1524;--line:#20334d;--text:#eaf2ff;--muted:#8295b2;--cyan:#65e6ff;--green:#68efb2}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 12% -10%,#102b42 0,transparent 38%),radial-gradient(ellipse at 90% 0,#21163b 0,transparent 32%),var(--bg);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,sans-serif}
+main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#163d56,#302052);border:1px solid #31617a;display:grid;place-items:center;color:var(--cyan);font-size:22px;font-weight:900;box-shadow:0 0 28px #32c8ff24}h1{font-size:22px;margin:0}.sub{color:var(--muted);font-size:12px;margin-top:4px}.headerRight{display:flex;align-items:center;gap:10px}.pill{border:1px solid var(--line);background:#0b1421;padding:8px 11px;border-radius:999px;color:#9bb1cb;font-size:11px}.liveDot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);margin-right:6px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}.stat,.panel{background:linear-gradient(145deg,#101b2b,#0b1320);border:1px solid var(--line);border-radius:15px}.stat{padding:15px 17px}.statLabel{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}.statValue{font-size:23px;font-weight:750;margin-top:6px}.statHint{font-size:11px;color:#7186a2;margin-top:3px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:13px 15px;margin-bottom:15px}.filters{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.filter{border:1px solid var(--line);background:#0a1422;color:#9bb0cb;padding:8px 13px;border-radius:9px;cursor:pointer}.filter.active{background:#123449;border-color:#2c94b4;color:var(--cyan);box-shadow:0 0 18px #27b9e51b}.search{background:#08111d;border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:9px;min-width:220px;outline:none}.search:focus{border-color:#3188a8}.refresh{background:#12354a;border:1px solid #277b9a;color:var(--cyan);padding:9px 14px;border-radius:9px;cursor:pointer;font-weight:700}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:15px}.sectionHead{display:flex;align-items:center;justify-content:space-between;padding:17px 18px 12px}.sectionHead h2{font-size:14px;margin:0}.sectionHead span{font-size:11px;color:var(--muted)}.collectionGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 12px 14px}.collection{display:flex;gap:12px;align-items:center;padding:12px;background:#0b1421;border:1px solid #1b2c43;border-radius:12px;cursor:pointer;transition:.16s;min-width:0}.collection:hover{border-color:#3484a4;background:#102033;transform:translateY(-1px)}.avatar{width:54px;height:54px;flex:0 0 54px;border-radius:11px;background:linear-gradient(135deg,#142d42,#302447);border:1px solid #28445e;object-fit:cover;display:grid;place-items:center;color:var(--cyan);font-weight:800;font-size:13px}.cInfo{min-width:0;flex:1}.cName{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cSymbol{font-size:11px;color:var(--muted);margin-top:4px}.cMeta{display:flex;gap:10px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:#8fa7c4}.salesBadge{font-size:11px;color:var(--green);white-space:nowrap;text-align:right}.salesBadge strong{display:block;font-size:16px}
+.side{display:flex;flex-direction:column;gap:14px}.salesList{padding:0 14px 12px}.sale{padding:11px 0;border-bottom:1px solid #1b2a3d;display:flex;justify-content:space-between;gap:10px}.sale:last-child{border:0}.saleName{font-weight:650}.saleSub{color:var(--muted);font-size:10px;margin-top:4px}.salePrice{text-align:right;color:var(--green);font-weight:700;white-space:nowrap}.saleTime{font-size:10px;color:var(--muted);margin-top:4px}
+.detail{margin-top:15px}.detailTop{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--line)}.detailTop h2{font-size:16px;margin:0}.detailTop .muted{color:var(--muted);font-size:11px;margin-top:4px}.detailActions{margin-left:auto;display:flex;gap:8px}.close{background:#142238;border:1px solid var(--line);color:#b6c7de;padding:8px 11px;border-radius:8px;cursor:pointer}.listingGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px}.listing{background:#0a1421;border:1px solid #1b2c43;border-radius:11px;overflow:hidden}.listing img{width:100%;aspect-ratio:1/1;object-fit:cover;background:#111d2d}.listingBody{padding:10px}.listingName{font-size:12px;font-weight:650;overflow-wrap:anywhere}.listingPrice{color:var(--green);font-size:13px;font-weight:800;margin-top:6px}.listingMint{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;margin-top:5px}
+.empty{padding:32px 18px;text-align:center;color:var(--muted);font-size:12px}.notice{margin:14px 12px 14px;padding:11px 13px;border:1px solid #51452c;background:#241d12;color:#d8bd84;border-radius:10px;font-size:11px;line-height:1.5}.footer{color:#62758e;font-size:10px;text-align:center;margin-top:18px}.hidden{display:none!important}
+@media(max-width:950px){.layout{grid-template-columns:1fr}.side{display:grid;grid-template-columns:1fr 1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){main{padding:16px 11px 40px}.header{align-items:flex-start}.headerRight{flex-direction:column;align-items:flex-end}.stats{gap:8px}.stat{padding:12px}.statValue{font-size:19px}.collectionGrid{grid-template-columns:1fr;padding:0 9px 10px}.side{display:flex}.listingGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}.search{min-width:150px;flex:1}.toolbar{padding:11px}.sectionHead{padding:14px}}
+</style></head><body><main>
+<header class="header"><div class="brand"><div class="logo">✦</div><div><h1>Solana NFT Market Pulse</h1><div class="sub">Live collections ranked by real marketplace sales</div></div></div><div class="headerRight"><span class="pill"><i class="liveDot"></i>READ ONLY · LIVE DATA</span><span class="pill">No wallet · No Helius</span></div></header>
+<section class="stats"><div class="stat"><div class="statLabel">Active collections</div><div class="statValue" id="activeCount">—</div><div class="statHint">Collections with sales in selected window</div></div><div class="stat"><div class="statLabel">Recent sales</div><div class="statValue" id="salesCount">—</div><div class="statHint">Decoded Magic Eden trades</div></div><div class="stat"><div class="statLabel">SOL volume</div><div class="statValue" id="volumeSol">—</div><div class="statHint">SOL-denominated sale amounts only</div></div><div class="stat"><div class="statLabel">Data sources</div><div class="statValue" style="font-size:17px">2 APIs</div><div class="statHint">Bitquery + API.SH / Magic Eden</div></div></section>
+<section class="panel toolbar"><div class="filters"><span style="color:var(--muted);font-size:11px;margin-right:3px">WINDOW</span><button class="filter" data-min="5">5m</button><button class="filter active" data-min="15">15m</button><button class="filter" data-min="60">1h</button><button class="filter" data-min="1440">24h</button></div><div class="filters"><input id="search" class="search" placeholder="Search collections…"><button class="refresh" id="refresh">↻ Refresh</button></div></section>
+<div class="layout"><section class="panel"><div class="sectionHead"><h2>Collections</h2><span id="collectionCount">Loading…</span></div><div id="collections" class="collectionGrid"><div class="empty">Fetching live collection activity…</div></div><div id="allNotice" class="notice hidden"></div></section>
+<aside class="side"><section class="panel"><div class="sectionHead"><h2>Latest sales</h2><span id="saleWindow">Last 15m</span></div><div id="salesFeed" class="salesList"><div class="empty">Loading real sales…</div></div></section><section class="panel"><div class="sectionHead"><h2>Coverage</h2><span>Source status</span></div><div style="padding:0 15px 15px;color:#91a6c2;font-size:11px;line-height:1.8"><div>● <b style="color:var(--green)">Bitquery V2</b> — Magic Eden M2 + MMM sales</div><div>● <b style="color:var(--green)">API.SH</b> — collection directory + listings</div><div>○ <b style="color:#d5b778">Tensor</b> — not included in current Bitquery feed</div><div>○ Chadbot — not used as a data provider</div></div></section></aside></div>
+<section id="detail" class="panel detail hidden"><div class="detailTop"><div class="avatar" id="detailAvatar">NFT</div><div><h2 id="detailName">Collection</h2><div class="muted" id="detailMeta"></div></div><div class="detailActions"><a id="magicLink" class="close" target="_blank" rel="noopener" style="text-decoration:none">Open Magic Eden ↗</a><button class="close" id="closeDetail">Close</button></div></div><div class="sectionHead"><h2>Active listings</h2><span id="listingCount">Loading…</span></div><div id="listings" class="listingGrid"><div class="empty">Loading collection listings from API.SH…</div></div></section>
+<div class="footer">Read-only public data · No wallet connection · No transactions · No synthetic sales or listing records</div>
+</main>
+<script>
+let selectedMinutes=15, allCollections=[], latestSales=[];
+const $=id=>document.getElementById(id);
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function short(v){if(!v)return '—';const s=String(v);return s.length>13?s.slice(0,5)+'…'+s.slice(-5):s}
+function timeAgo(v){if(!v)return '';const sec=Math.max(0,Math.floor((Date.now()-new Date(v).getTime())/1000));if(sec<60)return sec+'s ago';if(sec<3600)return Math.floor(sec/60)+'m ago';return Math.floor(sec/3600)+'h ago'}
+function money(v){if(v===null||v===undefined||v==='')return '—';const n=Number(v);return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:4}):String(v)}
+function arrFrom(value,keys,predicate){if(!value)return [];if(Array.isArray(value)){if(value.some(predicate))return value;for(const x of value){const a=arrFrom(x,keys,predicate);if(a.length)return a}return []}if(typeof value==='object'){for(const k of keys){if(k in value){const a=arrFrom(value[k],keys,predicate);if(a.length)return a}}for(const x of Object.values(value)){const a=arrFrom(x,keys,predicate);if(a.length)return a}}return []}
+function renderCollections(){
+ const q=$('search').value.trim().toLowerCase();
+ const rows=allCollections.filter(c=>(c.name+' '+c.symbol).toLowerCase().includes(q));
+ $('collectionCount').textContent=rows.length+' collections · ranked by sales';
+ $('collections').innerHTML=rows.length?rows.map(c=>{
+  const avatar=c.image?'<img class="avatar" src="'+escapeHtml(c.image)+'" alt="" loading="lazy">':'<div class="avatar">'+escapeHtml((c.symbol||'NFT').slice(0,3))+'</div>';
+  return '<article class="collection" data-symbol="'+escapeHtml(c.symbol)+'">'+avatar+'<div class="cInfo"><div class="cName">'+escapeHtml(c.name||c.symbol)+'</div><div class="cSymbol">'+escapeHtml(c.symbol)+'</div><div class="cMeta"><span>Floor '+money(c.floorPrice)+' SOL</span><span>'+(c.listedCount===null||c.listedCount===undefined?'Listings —':'Listed '+money(c.listedCount))+'</span></div></div><div class="salesBadge"><strong>'+Number(c.salesCount||0)+'</strong>sales</div></article>'
+ }).join(''):'<div class="empty">No matching collections in this directory.</div>';
+ $('collections').querySelectorAll('.collection').forEach(el=>el.addEventListener('click',()=>openCollection(el.dataset.symbol)));
+}
+function renderSales(){
+ $('salesFeed').innerHTML=latestSales.length?latestSales.slice(0,18).map(s=>'<div class="sale"><div><div class="saleName">'+escapeHtml(s.name||s.symbol)+'</div><div class="saleSub">'+escapeHtml(s.marketplace||'Magic Eden')+' · '+short(s.mint)+'</div></div><div><div class="salePrice">'+money(s.price)+' '+escapeHtml(s.priceCurrency||'')+'</div><div class="saleTime">'+timeAgo(s.time)+'</div></div></div>').join(''):'<div class="empty">No decoded sales in this window. Try a wider time filter.</div>';
+}
+async function loadMarket(){
+ $('collections').innerHTML='<div class="empty">Fetching real collections and recent sales…</div>';$('salesFeed').innerHTML='<div class="empty">Loading…</div>';
+ try{
+  const r=await fetch('/api/market/collections?minutes='+selectedMinutes);const data=await r.json();
+  if(!r.ok||!data.success)throw new Error(data.error||'Marketplace feed request failed');
+  allCollections=data.collections||[];latestSales=data.sales||[];
+  const active=allCollections.filter(c=>Number(c.salesCount)>0);
+  $('activeCount').textContent=active.length.toLocaleString();$('salesCount').textContent=latestSales.length.toLocaleString();
+  $('volumeSol').textContent=money(active.reduce((sum,c)=>sum+Number(c.volumeSol||0),0));
+  $('saleWindow').textContent='Last '+(selectedMinutes===1440?'24h':selectedMinutes+'m');
+  renderCollections();renderSales();
+  const note=(data.limitations||[]).join(' ');$('allNotice').textContent=note;$('allNotice').classList.toggle('hidden',!note);
+ }catch(e){$('collections').innerHTML='<div class="empty">Could not load marketplace data: '+escapeHtml(e.message)+'</div>';$('salesFeed').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>';$('activeCount').textContent='—';$('salesCount').textContent='—';$('volumeSol').textContent='—'}
+}
+async function openCollection(symbol){
+ const c=allCollections.find(x=>String(x.symbol).toLowerCase()===String(symbol).toLowerCase())||{symbol,name:symbol};
+ $('detail').classList.remove('hidden');$('detailName').textContent=c.name||symbol;$('detailMeta').textContent=symbol+' · '+(c.salesCount||0)+' sales in selected window';
+ $('detailAvatar').textContent=(symbol||'NFT').slice(0,3);$('magicLink').href='https://magiceden.io/marketplace/'+encodeURIComponent(symbol);
+ $('listings').innerHTML='<div class="empty">Loading active listings from Magic Eden…</div>';$('listingCount').textContent='Loading…';
+ $('detail').scrollIntoView({behavior:'smooth',block:'start'});
+ try{
+  const r=await fetch('/api/market/collection/'+encodeURIComponent(symbol)+'/listings');const data=await r.json();
+  if(!r.ok||!data.success)throw new Error(data.error||'Listings request failed');
+  const items=arrFrom(data.data,['listings','results','items','tokens','data'],x=>x&&typeof x==='object'&&(x.listPrice!==undefined||x.price!==undefined||x.tokenMint||x.mint||x.mintAddress));
+  $('listingCount').textContent=items.length+' returned · API.SH';
+  $('listings').innerHTML=items.length?items.map(item=>{
+   const image=item.image||item.imageUrl||item.imageURI||item.img||null;
+   const name=item.name||item.title||short(item.tokenMint||item.mint||item.mintAddress||'NFT');
+   const price=item.listPrice??item.price??item.priceSol;
+   const mint=item.tokenMint||item.mint||item.mintAddress||item.id||'';
+   return '<article class="listing">'+(image?'<img src="'+escapeHtml(image)+'" alt="" loading="lazy">':'<div style="aspect-ratio:1;background:#111d2d;display:grid;place-items:center;color:#65e6ff">NFT</div>')+'<div class="listingBody"><div class="listingName">'+escapeHtml(name)+'</div><div class="listingPrice">'+money(price)+' SOL</div><div class="listingMint">'+escapeHtml(mint)+'</div></div></article>'
+  }).join(''):'<div class="empty">API.SH returned no parseable active listing items for this collection. No placeholder listings are shown.</div>';
+ }catch(e){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
+}
+$('search').addEventListener('input',renderCollections);$('refresh').addEventListener('click',loadMarket);$('closeDetail').addEventListener('click',()=>$('detail').classList.add('hidden'));
+document.querySelectorAll('[data-min]').forEach(btn=>btn.addEventListener('click',()=>{selectedMinutes=Number(btn.dataset.min);document.querySelectorAll('[data-min]').forEach(x=>x.classList.toggle('active',x===btn));loadMarket()}));
+loadMarket();setInterval(loadMarket,30000);
+</script></body></html>
