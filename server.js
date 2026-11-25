@@ -32,6 +32,7 @@ async function me(pathname) {
 
 function arr(value) { if (Array.isArray(value)) return value; if (!value || typeof value !== 'object') return []; for (const key of ['collections','results','activities','listings','tokens','data']) if (Array.isArray(value[key])) return value[key]; return []; }
 function asNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
+function asNullableNumber(value) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) ? n : null; }
 function pickTime(a) {
   const raw = a.blockTime ?? a.block_time ?? a.timestamp ?? a.createdAt ?? a.created_at ?? a.time;
   if (typeof raw === 'number') return raw > 1e12 ? raw : raw * 1000;
