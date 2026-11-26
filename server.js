@@ -280,13 +280,36 @@ function readMagicEdenCollection(token) {
   };
 }
 const collectionDetailsCache = new Map();
+let magicEdenCollectionsIndex = { at:0, map:null, pending:null };
+async function getMagicEdenCollectionsIndex() {
+  if (magicEdenCollectionsIndex.map && Date.now() - magicEdenCollectionsIndex.at < 6 * 60 * 60 * 1000) return magicEdenCollectionsIndex.map;
+  if (magicEdenCollectionsIndex.pending) return magicEdenCollectionsIndex.pending;
+  magicEdenCollectionsIndex.pending = (async () => {
+    try {
+      const raw = await magicEdenGet('/collections', { offset:0, limit:500 });
+      const rows = Array.isArray(raw) ? raw : (raw?.collections || raw?.results || raw?.data || []);
+      const map = new Map(rows.filter(x => x?.symbol).map(x => [String(x.symbol).toLowerCase(), x]));
+      magicEdenCollectionsIndex = { at:Date.now(), map, pending:null };
+      return map;
+    } catch (error) {
+      console.error('Magic Eden collection directory lookup failed:', error.status || 'network', error.message);
+      magicEdenCollectionsIndex.pending = null;
+      return new Map();
+    }
+  })();
+  return magicEdenCollectionsIndex.pending;
+}
 async function getMagicEdenCollectionDetails(symbol) {
   if (!symbol) return null;
   const key = String(symbol).toLowerCase(), cached = collectionDetailsCache.get(key);
   if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) return cached.data;
   try {
-    const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol));
-    const data = raw?.collection || raw?.data || raw;
+    const index = await getMagicEdenCollectionsIndex();
+    let data = index.get(key);
+    if (!data) {
+      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol));
+      data = raw?.collection || raw?.data || raw;
+    }
     const result = {
       collectionSymbol: pickText(data?.symbol, data?.collectionSymbol, symbol),
       name: pickText(data?.name, data?.title, data?.collectionName),
@@ -296,10 +319,10 @@ async function getMagicEdenCollectionDetails(symbol) {
       listedCount: data?.listedCount ?? data?.listed_count ?? null,
       verified: Boolean(data?.isVerified || data?.verified)
     };
-    collectionDetailsCache.set(key, { at: Date.now(), data: result }); return result;
+    collectionDetailsCache.set(key, { at:Date.now(), data:result }); return result;
   } catch (error) {
     console.error('Magic Eden collection metadata failed:', symbol, error.status || 'network', error.message);
-    collectionDetailsCache.set(key, { at: Date.now(), data: null }); return null;
+    collectionDetailsCache.set(key, { at:Date.now(), data:null }); return null;
   }
 }
 async function lookupCollectionFromMint(mint) {
