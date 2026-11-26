@@ -491,16 +491,19 @@ app.get('/api/market/collections', async (req, res) => {
       const meta = g.collectionMeta || {}, address = meta.collectionAddress || g.collectionAddress || null;
       const marketSymbol = meta.collectionSymbol || null;
       if (!address && !marketSymbol) continue;
-      const key = marketSymbol ? 'magiceden:' + String(marketSymbol).toLowerCase() : 'address:' + String(address).toLowerCase();
+      // Prefer the on-chain collection address as the canonical identity. Use the
+      // Magic Eden symbol only when no collection address is available.
+      const key = address ? 'address:' + String(address).toLowerCase() : 'magiceden:' + String(marketSymbol).toLowerCase();
       const symbol = marketSymbol || meta.onChainSymbol || ('COLL-' + String(address).slice(0, 7));
-      const name = meta.name || (marketSymbol ? marketSymbol.replace(/[_-]+/g, ' ') : null);
+      const name = meta.name || (marketSymbol ? marketSymbol.replace(/[_-]+/g, ' ') : (meta.onChainSymbol || null));
       if (!name) continue;
       const current = collectionsByKey.get(key) || { id:key, symbol, magicEdenSymbol:marketSymbol, name, image:meta.image || null,
         floorPrice:meta.floorPrice ?? null, listedCount:meta.listedCount ?? null, verified:Boolean(meta.verified),
         collectionAddress:address, salesCount:0, volumeSol:0, lastSale:null, marketplace:g.marketplace || 'Magic Eden', collectionResolved:true };
       current.salesCount += Number(g.salesCount || 0); current.volumeSol += Number(g.volumeSol || 0);
       if (!current.collectionAddress && address) current.collectionAddress = address;
-      if (!current.magicEdenSymbol && marketSymbol) current.magicEdenSymbol = marketSymbol;
+      if (!current.magicEdenSymbol && marketSymbol) { current.magicEdenSymbol = marketSymbol; current.symbol = marketSymbol; }
+      if ((!current.name || current.name.startsWith('COLL-')) && name) current.name = name;
       if (!current.image && meta.image) current.image = meta.image;
       if (meta.floorPrice !== null && meta.floorPrice !== undefined) current.floorPrice = meta.floorPrice;
       if (meta.listedCount !== null && meta.listedCount !== undefined) current.listedCount = meta.listedCount;
