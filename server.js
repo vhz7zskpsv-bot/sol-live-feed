@@ -587,7 +587,7 @@ async function getMagicEdenSalesSnapshot(minutes) {
     .filter(x => x && (x.symbol || x.collectionSymbol))
     .sort((a, b) => Number(b.volumeAll || b.volume24hr || b.volume_24hr || b.volume_24hr_sol || 0) -
                     Number(a.volumeAll || a.volume24hr || a.volume_24hr || a.volume_24hr_sol || 0))
-    .slice(0, 12);
+    .slice(0, 20);
   const sales = [];
   const errors = [];
   const activityTypeCounts = {};
@@ -682,7 +682,7 @@ async function getGlobalNftSales(minutes) {
       lookupCollectionFromMint(g.sampleMint).catch(() => null);
     }
 
-    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, errors:snapshotData.errors || [] } };
+    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, rawActivityRows:snapshotData.rawActivityRows || 0, activityTypeCounts:snapshotData.activityTypeCounts || {}, recognizedSaleRows:snapshotData.recognizedSaleRows || 0, errors:snapshotData.errors || [] } };
     salesCache.set(minutes, { at: Date.now(), data });
     return data;
   })();
