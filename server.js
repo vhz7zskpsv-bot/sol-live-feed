@@ -293,7 +293,7 @@ async function getRecentSolanaMintsFree() {
             const programId = ix.programId || keys[ix.programIdIndex] || '';
             if (programId !== program.id) continue;
             const accounts = (ix.accounts || []).map(a => typeof a === 'number' ? keys[a] : (typeof a === 'string' ? a : a?.pubkey)).filter(Boolean);
-            const logs = (tx?.meta?.logMessages || []).join('\\n');
+            const logs = (tx?.meta?.logMessages || []).join('\n');
             let id = null;
             if (program.kind === 'metadata') id = accounts[1] || null;
             else if (program.kind === 'core') id = accounts[0] || null;
@@ -624,12 +624,14 @@ async function getGlobalNftSales(minutes) {
   if (salesPending.has(minutes)) return salesPending.get(minutes);
 
   const pending = (async () => {
-    const snapshotData = await getMagicEdenSalesSnapshot(minutes);\n    const snapshot = snapshotData.sales;
+    const snapshotData = await getMagicEdenSalesSnapshot(minutes);
+    const snapshot = snapshotData.sales;
     const cutoff = Date.now() - minutes * 60000;
     const sales = snapshot.filter(sale => !sale.time || new Date(sale.time).getTime() >= cutoff);
     const groups = new Map();
     for (const sale of sales) {
-      const saleCollectionAddress = sale.collectionAddress || sale.collectionMeta?.collectionAddress || null;\n      const key = saleCollectionAddress ? 'collection:' + String(saleCollectionAddress).toLowerCase() : (sale.collectionSymbol ? 'symbol:' + String(sale.collectionSymbol).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol));
+      const saleCollectionAddress = sale.collectionAddress || sale.collectionMeta?.collectionAddress || null;
+      const key = saleCollectionAddress ? 'collection:' + String(saleCollectionAddress).toLowerCase() : (sale.collectionSymbol ? 'symbol:' + String(sale.collectionSymbol).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol));
       const g = groups.get(key) || { key, collectionAddress: saleCollectionAddress, sampleMint: sale.mint,
         symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
         lastSale: sale.time, marketplace: sale.marketplace, collectionMeta: sale.collectionMeta || null };
