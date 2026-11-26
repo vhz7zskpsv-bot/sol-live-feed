@@ -370,9 +370,11 @@ app.get('/api/market/collections', async (req, res) => {
       // Unresolved individual NFT mints remain in the recent-sales feed and diagnostics.
       if (!address) continue;
       const key = 'collection:' + String(address).toLowerCase();
-      const fallbackSymbol = g.symbol && g.symbol !== 'Unknown' ? g.symbol : String(address).slice(0,10);
-      const symbol = meta.symbol || 'collection_' + String(address).slice(0,8);
-      const name = meta.name || g.name || 'Solana NFT Collection';
+      // Never use the traded NFT's token name/symbol as the collection identity.
+      // Bitquery's CollectionAddress is the grouping key; DAS metadata is optional enrichment.
+      const addressShort = String(address);
+      const symbol = meta.symbol || 'COLL-' + addressShort.slice(0,8);
+      const name = meta.name || ('Collection ' + addressShort.slice(0,5) + '…' + addressShort.slice(-5));
       const current = collectionsByKey.get(key) || {
         symbol, name, image: meta.image || null, floorPrice: null, listedCount: null,
         verified: Boolean(meta.verified), collectionAddress: address,
