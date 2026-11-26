@@ -629,8 +629,8 @@ async function getGlobalNftSales(minutes) {
     const sales = snapshot.filter(sale => !sale.time || new Date(sale.time).getTime() >= cutoff);
     const groups = new Map();
     for (const sale of sales) {
-      const key = sale.collectionAddress ? 'collection:' + String(sale.collectionAddress).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol);
-      const g = groups.get(key) || { key, collectionAddress: sale.collectionAddress, sampleMint: sale.mint,
+      const saleCollectionAddress = sale.collectionAddress || sale.collectionMeta?.collectionAddress || null;\n      const key = saleCollectionAddress ? 'collection:' + String(saleCollectionAddress).toLowerCase() : (sale.collectionSymbol ? 'symbol:' + String(sale.collectionSymbol).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol));
+      const g = groups.get(key) || { key, collectionAddress: saleCollectionAddress, sampleMint: sale.mint,
         symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
         lastSale: sale.time, marketplace: sale.marketplace };
       g.salesCount++;
@@ -653,7 +653,7 @@ async function getGlobalNftSales(minutes) {
       lookupCollectionFromMint(g.sampleMint).catch(() => null);
     }
 
-    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
+    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, timeRange:snapshotData.timeRange, errors:snapshotData.errors || [] } };
     salesCache.set(minutes, { at: Date.now(), data });
     return data;
   })();
@@ -734,7 +734,7 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.groups.length, decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
       note:salesData.sales.length===0?'Bitquery returned zero decoded Magic Eden NFT trades in this time window.':null };
