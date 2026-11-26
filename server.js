@@ -561,7 +561,9 @@ async function getBitquerySalesSnapshot() {
 
 const magicEdenSalesCache = new Map();
 async function getMagicEdenSalesSnapshot(minutes) {
-  const cacheKey = minutes >= 1440 ? '1d' : '1h';
+  // Use the daily popularity leaderboard as a broad discovery list even for
+  // short display windows. Actual sale timestamps are filtered downstream.
+  const cacheKey = '1d';
   const cached = magicEdenSalesCache.get(cacheKey);
   if (cached && Date.now() - cached.at < 60000) return cached.data;
   const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: cacheKey });
@@ -570,39 +572,45 @@ async function getMagicEdenSalesSnapshot(minutes) {
   const collections = popularRows.filter(x => x && (x.symbol || x.collectionSymbol)).slice(0, 12);
   const sales = [];
   const errors = [];
+  const activityTypeCounts = {};
+  let rawActivityRows = 0;
   for (const collection of collections) {
     const symbol = String(collection.symbol || collection.collectionSymbol);
     try {
       const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
       const rows = findListingRows(raw);
-      const meta = {
-        collectionSymbol: symbol,
-        name: collection.name || collection.title || symbol,
-        image: collection.image || collection.imageUrl || collection.imageURL || null,
-        collectionAddress: collection.collectionAddress || collection.collection_address || null,
-        floorPrice: collection.floorPrice ?? collection.floor_price ?? null,
-        listedCount: collection.listedCount ?? collection.listed_count ?? null,
-        verified: Boolean(collection.isVerified || collection.verified)
-      };
+      rawActivityRows += rows.length;
       for (const item of rows) {
-        const type = String(item.type || item.activityType || item.activity_type || '').toLowerCase();
-        if (!['buynow','acceptbid','buy','sale','auctionbuy','sold'].includes(type)) continue;
+        const originalType = String(item.type || item.activityType || item.activity_type || item.txType || '').trim();
+        const normalizedType = originalType.toLowerCase().replace(/[^a-z]/g, '');
+        if (originalType) activityTypeCounts[originalType] = (activityTypeCounts[originalType] || 0) + 1;
+        const isSale = ['buynow','acceptbid','buy','sale','auctionbuy','sold','purchase','purchasesale'].includes(normalizedType);
+        if (!isSale) continue;
         const token = item.token || item.nft || item.item || item.asset || {};
-        const rawTime = item.blockTime ?? item.block_time ?? item.time ?? item.createdAt ?? item.created_at ?? null;
+        const rawTime = item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ?? item.createdAt ?? item.created_at ?? null;
         let time = rawTime;
         if (typeof rawTime === 'number' && rawTime < 1000000000000) time = new Date(rawTime * 1000).toISOString();
-        else if (typeof rawTime === 'string' && /^\d{10}$/.test(rawTime)) time = new Date(Number(rawTime) * 1000).toISOString();
+        else if (typeof rawTime === 'string' && /^\\d{10}$/.test(rawTime)) time = new Date(Number(rawTime) * 1000).toISOString();
         else if (rawTime && !Number.isNaN(Date.parse(rawTime))) time = new Date(rawTime).toISOString();
         const rawPrice = item.priceSol ?? item.price_sol ?? item.price ?? item.amount ?? item.paymentAmount ?? null;
         const price = typeof rawPrice === 'object' && rawPrice ? (rawPrice.sol ?? rawPrice.amount ?? null) : rawPrice;
         const mint = item.tokenMint || item.token_mint || item.mint || item.mintAddress ||
           token.tokenMint || token.mint || token.mintAddress || token.id || null;
+        const collectionMeta = {
+          collectionSymbol: symbol,
+          name: collection.name || collection.title || symbol,
+          image: collection.image || collection.imageUrl || collection.imageURL || null,
+          collectionAddress: collection.collectionAddress || collection.collection_address || null,
+          floorPrice: collection.floorPrice ?? collection.floor_price ?? null,
+          listedCount: collection.listedCount ?? collection.listed_count ?? null,
+          verified: Boolean(collection.isVerified || collection.verified)
+        };
         sales.push({
-          time, signature: item.signature || item.txSignature || item.tx_signature || null,
+          time, signature: item.signature || item.txSignature || item.tx_signature || item.transaction_id || null,
           symbol: token.symbol || collection.symbol || symbol,
           name: token.name || token.title || item.name || item.tokenName || collection.name || symbol,
-          mint, collectionAddress: meta.collectionAddress, collectionSymbol: symbol,
-          collectionMeta: meta, nftAmount: 1, price: price === null ? null : Number(price),
+          mint, collectionAddress: collectionMeta.collectionAddress, collectionSymbol: symbol,
+          collectionMeta, nftAmount: 1, price: price === null ? null : Number(price),
           priceCurrency: item.currency || item.paymentSymbol || item.priceCurrency || 'SOL',
           priceCurrencyMint: item.currencyMint || item.paymentMint || null,
           marketplace: 'Magic Eden'
@@ -613,7 +621,8 @@ async function getMagicEdenSalesSnapshot(minutes) {
       console.error('Magic Eden activity lookup failed for', symbol, error.status || 'network', error.message);
     }
   }
-  const data = { sales, collections, errors, timeRange: cacheKey, sampledCollections: collections.length };
+  const data = { sales, collections, errors, timeRange: cacheKey, sampledCollections: collections.length,
+    rawActivityRows, activityTypeCounts, recognizedSaleRows: sales.length };
   magicEdenSalesCache.set(cacheKey, { at: Date.now(), data });
   return data;
 }
@@ -736,10 +745,10 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
-      note:salesData.sales.length===0?'Magic Eden returned no sale events for the sampled popular collections in this time window.':null };
+      note:salesData.sales.length===0?(salesData.sourceDiagnostics?.rawActivityRows ? 'Activity records were returned, but no recognized sale event types were found. Check activityTypeCounts.' : 'No activity records were returned for the sampled popular collections.'):null };
     res.json({ success:true, minutes, collections, activeCollections:collections.length, directoryCount:collections.length,
       directoryPages:1, directoryHasMore:false, sales:salesData.sales, salesDiagnostics, providerErrors:{},
       sources:{ sales:'Magic Eden public Solana API (popular collections + per-collection activities)', collectionMetadata:'Magic Eden public Solana API + optional QuickNode Metaplex DAS' },
