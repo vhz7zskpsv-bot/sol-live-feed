@@ -248,53 +248,33 @@ function normalizeCollection(x) {
     listedCount: x.listedCount ?? x.listed_count ?? x.listed ?? null,
     verified: x.isVerified ?? x.verified ?? false, collectionAddress, raw: x };
 }
-async function getCollectionDirectory() {
-  if (directoryCache.data && Date.now() - directoryCache.at < 900000) return directoryCache.data;
-  const rows = [];
-  const seen = new Set();
-  let page = 1;
-  let nextPage = 1;
-  let pagesFetched = 0;
-  while (nextPage && pagesFetched < 20) {
-    const raw = await apiShGet('/magiceden/v1/collections', { page, limit: 500 });
-    const items = findArray(raw, x => x.symbol || x.collectionSymbol || x.collection_symbol);
-    for (const item of items) {
-      const normalized = normalizeCollection(item);
-      if (normalized.symbol && !seen.has(normalized.symbol.toLowerCase())) {
-        seen.add(normalized.symbol.toLowerCase());
-        rows.push(normalized);
-      }
-    }
-    pagesFetched++;
-    const advertisedNext = raw?.next_page ?? raw?.data?.next_page ?? raw?.result?.next_page ?? null;
-    nextPage = advertisedNext ? Number(advertisedNext) : null;
-    if (nextPage && (!Number.isFinite(nextPage) || nextPage <= page)) nextPage = null;
-    if (nextPage) page = nextPage;
-  }
-  const data = { rows, pagesFetched, hasMore: Boolean(nextPage), count: rows.length };
-  directoryCache.at = Date.now(); directoryCache.data = data;
-  return data;
-}
-async function lookupCollectionSymbolFromMint(mint) {
+async function lookupCollectionFromMint(mint) {
   if (!mint) return null;
   const cached = collectionLookupCache.get(mint);
-  if (cached && Date.now() - cached.at < 3600000) return cached.symbol;
+  if (cached && Date.now() - cached.at < 3600000) return cached.data;
+  if (!QUICKNODE_RPC_URL) return null;
   try {
-    const raw = await apiShGet('/magiceden/v1/token', { mint });
-    const roots = [raw, raw?.token, raw?.data, raw?.result].filter(Boolean);
-    let symbol = null;
-    for (const root of roots) {
-      if (typeof root.collection === 'string') symbol = root.collection;
-      else if (root.collection && typeof root.collection === 'object') {
-        symbol = root.collection.symbol || root.collection.collectionSymbol || root.collection.slug || null;
-      }
-      symbol = symbol || root.collectionSymbol || root.collection_symbol || null;
-      if (symbol) break;
-    }
-    collectionLookupCache.set(mint, { at: Date.now(), symbol });
-    return symbol;
+    const asset = await quicknodeRpc('getAsset', {
+      id: mint,
+      options: { showCollectionMetadata: true }
+    });
+    const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection');
+    const metadata = asset?.content?.metadata || {};
+    const files = asset?.content?.files || [];
+    const imageFile = files.find(x => x?.mime?.startsWith('image/')) || files[0];
+    const collectionMetadata = grouping?.collection_metadata || {};
+    const result = grouping?.group_value ? {
+      collectionAddress: grouping.group_value,
+      name: collectionMetadata.name || grouping.name || metadata.collection?.name || null,
+      symbol: collectionMetadata.symbol || metadata.symbol || null,
+      image: collectionMetadata.image || imageFile?.uri || null,
+      verified: Boolean(grouping.verified)
+    } : null;
+    collectionLookupCache.set(mint, { at: Date.now(), data: result });
+    return result;
   } catch (error) {
-    console.error('Magic Eden mint-to-collection lookup failed:', error.status || 'network', error.message);
+    console.error('QuickNode DAS collection lookup failed:', error.status || 'network', error.message);
+    collectionLookupCache.set(mint, { at: Date.now(), data: null });
     return null;
   }
 }
@@ -326,13 +306,12 @@ async function getGlobalNftSales(minutes) {
     if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
     groups.set(key, g);
   }
-  const lookupCandidates = [
-    ...[...groups.values()].filter(g => g.collectionAddress && g.sampleMint),
-    ...[...groups.values()].filter(g => !g.collectionAddress && g.sampleMint)
-      .sort((a, b) => b.salesCount - a.salesCount).slice(0, 15)
-  ];
+  const lookupCandidates = [...groups.values()]
+    .filter(g => g.sampleMint)
+    .sort((a, b) => b.salesCount - a.salesCount)
+    .slice(0, 50);
   await Promise.all(lookupCandidates.map(async g => {
-    g.resolvedSymbol = await lookupCollectionSymbolFromMint(g.sampleMint);
+    g.collectionMeta = await lookupCollectionFromMint(g.sampleMint);
   }));
   const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
   salesCache.set(minutes, { at: Date.now(), data }); return data;
@@ -382,62 +361,58 @@ app.get('/api/bitquery/test', async (req, res) => {
 app.get('/api/market/collections', async (req, res) => {
   const minutes = [5,15,60,1440].includes(Number(req.query.minutes)) ? Number(req.query.minutes) : 15;
   try {
-    const [directoryResult, salesResult] = await Promise.allSettled([getCollectionDirectory(), getGlobalNftSales(minutes)]);
-    const directory = directoryResult.status === 'fulfilled' ? directoryResult.value.rows : [];
-    const salesData = salesResult.status === 'fulfilled' ? salesResult.value : { sales: [], groups: [] };
-    const bySymbol = new Map(directory.map(x => [x.symbol.toLowerCase(), x]));
-    const byCollectionAddress = new Map(directory
-      .filter(x => x.collectionAddress)
-      .map(x => [String(x.collectionAddress).toLowerCase(), x]));
-    // Prefer an exact on-chain collection-address match. Otherwise require an
-    // exact Magic Eden directory symbol returned by the mint metadata resolver.
-    const activeBySymbol = new Map();
+    const salesData = await getGlobalNftSales(minutes);
+    const collectionsByKey = new Map();
     for (const g of salesData.groups) {
-      const addressMatch = g.collectionAddress
-        ? byCollectionAddress.get(String(g.collectionAddress).toLowerCase())
-        : null;
-      const resolved = g.resolvedSymbol || '';
-      const meta = addressMatch || bySymbol.get(String(resolved).toLowerCase());
-      if (!meta) continue;
-      const key = meta.symbol.toLowerCase();
-      const current = activeBySymbol.get(key) || { ...meta, salesCount:0, volumeSol:0, lastSale:null, marketplace:'Magic Eden' };
+      const meta = g.collectionMeta || {};
+      const address = meta.collectionAddress || g.collectionAddress || null;
+      const key = address ? 'collection:' + String(address).toLowerCase()
+        : 'unresolved:' + String(g.sampleMint || g.symbol).toLowerCase();
+      const fallbackSymbol = g.symbol && g.symbol !== 'Unknown' ? g.symbol : String(g.sampleMint || 'NFT').slice(0,10);
+      const symbol = meta.symbol || (address ? 'collection_' + String(address).slice(0,8) : 'unresolved_' + String(g.sampleMint || fallbackSymbol).slice(0,8));
+      const name = meta.name || (address ? (g.name || 'Solana NFT Collection') : ('Unresolved NFT · ' + (g.name || fallbackSymbol)));
+      const current = collectionsByKey.get(key) || {
+        symbol, name, image: meta.image || null, floorPrice: null, listedCount: null,
+        verified: Boolean(meta.verified), collectionAddress: address,
+        sampleMint: g.sampleMint || null, salesCount: 0, volumeSol: 0,
+        lastSale: null, marketplace: g.marketplace || 'Magic Eden',
+        collectionResolved: Boolean(address)
+      };
       current.salesCount += Number(g.salesCount || 0);
       current.volumeSol += Number(g.volumeSol || 0);
+      if (!current.sampleMint && g.sampleMint) current.sampleMint = g.sampleMint;
+      if (!current.image && meta.image) current.image = meta.image;
       if (g.lastSale && (!current.lastSale || new Date(g.lastSale) > new Date(current.lastSale))) current.lastSale = g.lastSale;
-      activeBySymbol.set(key, current);
+      collectionsByKey.set(key, current);
     }
-    const active = [...activeBySymbol.values()];
-    const resolvedGroups = salesData.groups.filter(g => {
-      const meta = bySymbol.get(String(g.resolvedSymbol || '').toLowerCase());
-      return Boolean(meta);
-    }).length;
-    const unresolvedGroups = salesData.groups.filter(g => !bySymbol.has(String(g.resolvedSymbol || '').toLowerCase()))
-      .slice(0, 8).map(g => ({ nftSymbol: g.symbol, sampleMint: g.sampleMint, salesCount: g.salesCount, resolverReturned: g.resolvedSymbol || null }));
+    const collections = [...collectionsByKey.values()]
+      .sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol || a.name.localeCompare(b.name));
+    const resolvedGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionAddress || g.collectionAddress)).length;
+    const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress))
+      .slice(0, 8).map(g => ({ nftSymbol: g.symbol, sampleMint: g.sampleMint, salesCount: g.salesCount }));
     const salesDiagnostics = {
-      requestedWindowMinutes: minutes,
-      bitqueryRequest: salesResult.status,
-      decodedSales: salesData.sales.length,
-      groupedNftSymbols: salesData.groups.length,
-      groupsResolvedToMagicEdenCollections: resolvedGroups,
-      groupsNotMatchedToDirectory: Math.max(0, salesData.groups.length - resolvedGroups),
+      requestedWindowMinutes: minutes, bitqueryRequest: 'fulfilled',
+      decodedSales: salesData.sales.length, groupedNftSymbols: salesData.groups.length,
+      groupsResolvedToCollections: resolvedGroups,
+      groupsNotMatchedToCollections: Math.max(0, salesData.groups.length - resolvedGroups),
       unresolvedSamples: unresolvedGroups,
-      note: salesResult.status === 'rejected'
-        ? 'Bitquery request failed; decoded sales are unavailable for this window.'
-        : salesData.sales.length === 0
-          ? 'Bitquery returned zero decoded Magic Eden NFT trades in this time window.'
-          : resolvedGroups === 0
-            ? 'Trades were decoded, but none of their NFT mints resolved to a Magic Eden directory collection.'
-            : null
+      note: salesData.sales.length === 0 ? 'Bitquery returned zero decoded Magic Eden NFT trades in this time window.' : null
     };
-    const activeKeys = new Set(active.map(x => x.symbol.toLowerCase()));
-    const inactive = directory.filter(x => !activeKeys.has(x.symbol.toLowerCase()))
-      .map(x => ({ ...x, salesCount:0, volumeSol:0, lastSale:null, marketplace:null }));
-    const collections = [...active, ...inactive].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol || a.name.localeCompare(b.name));
-    res.json({ success:true, minutes, collections, activeCollections:active.length,
-      directoryCount:directory.length, directoryPages:directoryResult.status === 'fulfilled' ? directoryResult.value.pagesFetched : 0,
-      directoryHasMore:directoryResult.status === 'fulfilled' ? directoryResult.value.hasMore : false,
-      sales:salesData.sales, salesDiagnostics, providerErrors:{ directory:directoryResult.status === 'rejected' ? directoryResult.reason.message : null, sales:salesResult.status === 'rejected' ? salesResult.reason.message : null }, sources:{ directory:'API.SH / Magic Eden', sales:'Bitquery V2 / Magic Eden M2 + MMM' },
-      limitations:['The collection directory is paged in batches of 500; at most 10,000 entries are loaded per refresh (20 pages) to control API credits.','Sales are attributed only when Magic Eden resolves the NFT mint to a directory collection symbol.'] });
+    res.json({
+      success: true, minutes, collections, activeCollections: collections.length,
+      directoryCount: null, directoryPages: 0, directoryHasMore: false,
+      sales: salesData.sales, salesDiagnostics, providerErrors: {},
+      sources: {
+        sales: 'Bitquery V2 / Magic Eden M2 + MMM',
+        collectionMetadata: QUICKNODE_RPC_URL ? 'QuickNode Metaplex DAS' : 'Bitquery on-chain collection fields'
+      },
+      limitations: [
+        'Collections are grouped from real sales in the selected time window; inactive collections are not requested.',
+        'QuickNode DAS enriches collection names and images when on-chain collection metadata exists.',
+        'When collection metadata is absent, the NFT is shown separately as unresolved rather than hidden.',
+        'API.SH is not used by the main collections and sales feed. Per-collection listings and detail endpoints still require API.SH credits.'
+      ]
+    });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
     res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
