@@ -595,7 +595,7 @@ async function getMagicEdenSalesSnapshot(minutes) {
   for (const collection of collections) {
     const symbol = String(collection.symbol || collection.collectionSymbol);
     try {
-      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 1000 });
+      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
       const rows = findListingRows(raw);
       rawActivityRows += rows.length;
       for (const item of rows) {
@@ -787,7 +787,7 @@ app.get('/api/market/collection/:symbol/activities', async (req, res) => {
   const key = symbol.toLowerCase(), cached = activitiesCache.get(key);
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
-    const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset:0, limit:1000 });
+    const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset:0, limit:100 });
     const activityRows = findListingRows(data);
     const items = activityRows.filter(item => {
       const type = String(item.type || item.activityType || '').toLowerCase();
