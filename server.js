@@ -239,11 +239,14 @@ function findListingRows(value, depth = 0) {
 
 function normalizeCollection(x) {
   const symbol = x.symbol || x.collectionSymbol || x.collection_symbol || x.id || '';
+  const collectionAddress = x.collectionAddress || x.collection_address ||
+    x.collectionMintAddress || x.collection_mint_address ||
+    x.collectionMint || x.collection_mint || x.mintAddress || x.mint_address || null;
   return { symbol: String(symbol), name: x.name || x.title || x.collectionName || String(symbol),
     image: x.image || x.imageUrl || x.imageURL || x.imageUri || x.imageURI || x.logo || x.logoUrl || null,
     floorPrice: x.floorPrice ?? x.floor_price ?? x.floor ?? null,
     listedCount: x.listedCount ?? x.listed_count ?? x.listed ?? null,
-    verified: x.isVerified ?? x.verified ?? false, raw: x };
+    verified: x.isVerified ?? x.verified ?? false, collectionAddress, raw: x };
 }
 async function getCollectionDirectory() {
   if (directoryCache.data && Date.now() - directoryCache.at < 900000) return directoryCache.data;
@@ -383,13 +386,18 @@ app.get('/api/market/collections', async (req, res) => {
     const directory = directoryResult.status === 'fulfilled' ? directoryResult.value.rows : [];
     const salesData = salesResult.status === 'fulfilled' ? salesResult.value : { sales: [], groups: [] };
     const bySymbol = new Map(directory.map(x => [x.symbol.toLowerCase(), x]));
-    // Bitquery Currency.Symbol is the individual NFT's token symbol (e.g. Y00),
-    // not reliably the Magic Eden collection slug (e.g. y00ts). Only promote a
-    // trade group to a collection when its symbol exactly matches the ME directory.
+    const byCollectionAddress = new Map(directory
+      .filter(x => x.collectionAddress)
+      .map(x => [String(x.collectionAddress).toLowerCase(), x]));
+    // Prefer an exact on-chain collection-address match. Otherwise require an
+    // exact Magic Eden directory symbol returned by the mint metadata resolver.
     const activeBySymbol = new Map();
     for (const g of salesData.groups) {
+      const addressMatch = g.collectionAddress
+        ? byCollectionAddress.get(String(g.collectionAddress).toLowerCase())
+        : null;
       const resolved = g.resolvedSymbol || '';
-      const meta = bySymbol.get(String(resolved).toLowerCase());
+      const meta = addressMatch || bySymbol.get(String(resolved).toLowerCase());
       if (!meta) continue;
       const key = meta.symbol.toLowerCase();
       const current = activeBySymbol.get(key) || { ...meta, salesCount:0, volumeSol:0, lastSale:null, marketplace:'Magic Eden' };
