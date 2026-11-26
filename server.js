@@ -251,6 +251,113 @@ async function getRecentSolanaMints() {
   launchCache.data = data;
   return data;
 }
+
+const SOLANA_PUBLIC_RPC_URL = 'https://api.mainnet-beta.solana.com';
+async function solanaPublicRpc(method, params) {
+  const response = await fetch(SOLANA_PUBLIC_RPC_URL, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'free-nft-mint-scan', method, params }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) {
+    const error = new Error(payload.error?.message || 'Solana public RPC returned HTTP ' + response.status);
+    error.status = response.status || 502;
+    throw error;
+  }
+  return payload.result;
+}
+async function getRecentSolanaMintsFree() {
+  if (launchCache.data && Date.now() - launchCache.at < 45000) return launchCache.data;
+  if (!QUICKNODE_RPC_URL) return { configured:false, scannedAt:null, assets:[], collections:[], note:'QuickNode DAS is required to hydrate detected NFT mint IDs. No paid indexer is used for discovery.' };
+  const programs = [
+    { id:'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s', standard:'NFT', kind:'metadata' },
+    { id:'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d', standard:'MPL Core', kind:'core' },
+    { id:'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY', standard:'cNFT', kind:'bubblegum' }
+  ];
+  const candidates = new Map();
+  let signaturesScanned = 0, transactionsRead = 0;
+  for (const program of programs) {
+    try {
+      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:8, commitment:'finalized' }]);
+      signaturesScanned += Array.isArray(signatures) ? signatures.length : 0;
+      for (const sig of (signatures || [])) {
+        if (sig.err) continue;
+        try {
+          const tx = await solanaPublicRpc('getTransaction', [sig.signature, { encoding:'jsonParsed', commitment:'finalized', maxSupportedTransactionVersion:0 }]);
+          transactionsRead++;
+          const message = tx?.transaction?.message || {};
+          const keys = (message.accountKeys || []).map(k => typeof k === 'string' ? k : k.pubkey);
+          const instructions = [...(message.instructions || []), ...((tx?.meta?.innerInstructions || []).flatMap(x => x.instructions || []))];
+          for (const ix of instructions) {
+            const programId = ix.programId || keys[ix.programIdIndex] || '';
+            if (programId !== program.id) continue;
+            const accounts = (ix.accounts || []).map(a => typeof a === 'number' ? keys[a] : (typeof a === 'string' ? a : a?.pubkey)).filter(Boolean);
+            const logs = (tx?.meta?.logMessages || []).join('\\n');
+            let id = null;
+            if (program.kind === 'metadata') id = accounts[1] || null;
+            else if (program.kind === 'core') id = accounts[0] || null;
+            else {
+              const match = logs.match(/Leaf asset ID:\\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+              id = match?.[1] || null;
+            }
+            if (!id || candidates.has(id)) continue;
+            candidates.set(id, { id, standard:program.standard, method:ix.parsed?.type || ix.data || 'create', signature:sig.signature,
+              creator:tx?.transaction?.message?.accountKeys?.find(k => typeof k === 'object' && k.signer)?.pubkey || null,
+              createdAt:tx?.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null });
+          }
+        } catch (error) {
+          console.error('Solana public RPC transaction lookup failed:', error.status || 'network', error.message);
+        }
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+    } catch (error) {
+      console.error('Solana public RPC signature scan failed for', program.standard, error.status || 'network', error.message);
+    }
+  }
+  const assets = [];
+  const discovered = [...candidates.values()].slice(0, 12);
+  for (const candidate of discovered) {
+    try {
+      const asset = await quicknodeRpc('getAsset', { id:candidate.id, options:{ showCollectionMetadata:true } });
+      if (!asset?.id) continue;
+      const metadata = asset.content?.metadata || {};
+      const files = asset.content?.files || [];
+      const file = files.find(x => x.mime?.startsWith('image/')) || files[0];
+      const collection = (asset.grouping || []).find(x => x.group_key === 'collection');
+      const creators = (asset.creators || []).map(x => x.address).filter(Boolean);
+      assets.push({
+        id:asset.id, name:metadata.name || 'Unnamed NFT', symbol:metadata.symbol || '', image:file?.uri || null,
+        interface:asset.interface || candidate.standard, collectionAddress:collection?.group_value || null,
+        collectionName:collection?.collection_metadata?.name || collection?.name || null,
+        collectionImage:collection?.collection_metadata?.image || null, verified:Boolean(collection?.verified), creators,
+        createdAt:candidate.createdAt || asset.created_at || asset.createdAt || null, mint:asset.id, standard:candidate.standard,
+        mintMethod:candidate.method, transaction:candidate.signature, creator:candidate.creator
+      });
+    } catch (error) {
+      console.error('QuickNode DAS hydration failed:', candidate.standard, error.status || 'network', error.message);
+    }
+    await new Promise(resolve => setTimeout(resolve, 550));
+  }
+  const grouped = new Map();
+  for (const asset of assets) {
+    const key = asset.collectionAddress || 'unverified:' + (asset.creators[0] || asset.id);
+    const group = grouped.get(key) || { id:key, name:asset.collectionName || 'Unverified / ungrouped mints',
+      image:asset.collectionImage || asset.image, collectionAddress:asset.collectionAddress, verified:asset.verified,
+      observedMints:0, latestMintAt:asset.createdAt, sampleAssets:[], supply:null, supplySource:'Not reported by asset indexer' };
+    group.observedMints++;
+    if (asset.createdAt && (!group.latestMintAt || new Date(asset.createdAt) > new Date(group.latestMintAt))) group.latestMintAt = asset.createdAt;
+    if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
+    grouped.set(key, group);
+  }
+  const data = { configured:true, scannedAt:new Date().toISOString(), assets, collections:[...grouped.values()].sort((a,b)=>new Date(b.latestMintAt||0)-new Date(a.latestMintAt||0)),
+    diagnostics:{ source:'Solana public RPC + QuickNode DAS', signaturesScanned, transactionsRead, uniqueAssetCandidates:candidates.size,
+      hydratedAssets:assets.length, standards:['standard Token Metadata NFTs','MPL Core','compressed NFTs only when the transaction log exposes Leaf asset ID'],
+      note:'Free public RPC is rate-limited. Bubblegum cNFT asset IDs are not guaranteed to be present in logs, so cNFT coverage is incomplete.' },
+    note:'Free-source mint scan: newest transactions from supported NFT programs are sampled, then asset metadata is hydrated through your existing QuickNode DAS endpoint. This is not a complete global mint index.' };
+  launchCache.at = Date.now(); launchCache.data = data; return data;
+}
+
 function findArray(value, predicate, depth = 0) {
   if (!value || depth > 5) return [];
   if (Array.isArray(value)) {
@@ -451,13 +558,73 @@ async function getBitquerySalesSnapshot() {
   return bitquerySalesSnapshot.pending;
 }
 
+
+const magicEdenSalesCache = new Map();
+async function getMagicEdenSalesSnapshot(minutes) {
+  const cacheKey = minutes >= 1440 ? '1d' : '1h';
+  const cached = magicEdenSalesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 60000) return cached.data;
+  const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: cacheKey });
+  const popularRows = Array.isArray(popularRaw) ? popularRaw :
+    (popularRaw?.collections || popularRaw?.results || popularRaw?.data || popularRaw?.items || []);
+  const collections = popularRows.filter(x => x && (x.symbol || x.collectionSymbol)).slice(0, 12);
+  const sales = [];
+  const errors = [];
+  for (const collection of collections) {
+    const symbol = String(collection.symbol || collection.collectionSymbol);
+    try {
+      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
+      const rows = findListingRows(raw);
+      const meta = {
+        collectionSymbol: symbol,
+        name: collection.name || collection.title || symbol,
+        image: collection.image || collection.imageUrl || collection.imageURL || null,
+        collectionAddress: collection.collectionAddress || collection.collection_address || null,
+        floorPrice: collection.floorPrice ?? collection.floor_price ?? null,
+        listedCount: collection.listedCount ?? collection.listed_count ?? null,
+        verified: Boolean(collection.isVerified || collection.verified)
+      };
+      for (const item of rows) {
+        const type = String(item.type || item.activityType || item.activity_type || '').toLowerCase();
+        if (!['buynow','acceptbid','buy','sale','auctionbuy','sold'].includes(type)) continue;
+        const token = item.token || item.nft || item.item || item.asset || {};
+        const rawTime = item.blockTime ?? item.block_time ?? item.time ?? item.createdAt ?? item.created_at ?? null;
+        let time = rawTime;
+        if (typeof rawTime === 'number' && rawTime < 1000000000000) time = new Date(rawTime * 1000).toISOString();
+        else if (typeof rawTime === 'string' && /^\\d{10}$/.test(rawTime)) time = new Date(Number(rawTime) * 1000).toISOString();
+        else if (rawTime && !Number.isNaN(Date.parse(rawTime))) time = new Date(rawTime).toISOString();
+        const rawPrice = item.priceSol ?? item.price_sol ?? item.price ?? item.amount ?? item.paymentAmount ?? null;
+        const price = typeof rawPrice === 'object' && rawPrice ? (rawPrice.sol ?? rawPrice.amount ?? null) : rawPrice;
+        const mint = item.tokenMint || item.token_mint || item.mint || item.mintAddress ||
+          token.tokenMint || token.mint || token.mintAddress || token.id || null;
+        sales.push({
+          time, signature: item.signature || item.txSignature || item.tx_signature || null,
+          symbol: token.symbol || collection.symbol || symbol,
+          name: token.name || token.title || item.name || item.tokenName || collection.name || symbol,
+          mint, collectionAddress: meta.collectionAddress, collectionSymbol: symbol,
+          collectionMeta: meta, nftAmount: 1, price: price === null ? null : Number(price),
+          priceCurrency: item.currency || item.paymentSymbol || item.priceCurrency || 'SOL',
+          priceCurrencyMint: item.currencyMint || item.paymentMint || null,
+          marketplace: 'Magic Eden'
+        });
+      }
+    } catch (error) {
+      errors.push(symbol + ': ' + error.message);
+      console.error('Magic Eden activity lookup failed for', symbol, error.status || 'network', error.message);
+    }
+  }
+  const data = { sales, collections, errors, timeRange: cacheKey, sampledCollections: collections.length };
+  magicEdenSalesCache.set(cacheKey, { at: Date.now(), data });
+  return data;
+}
+
 async function getGlobalNftSales(minutes) {
   const old = salesCache.get(minutes);
   if (old && Date.now() - old.at < 45000) return old.data;
   if (salesPending.has(minutes)) return salesPending.get(minutes);
 
   const pending = (async () => {
-    const snapshot = await getBitquerySalesSnapshot();
+    const snapshotData = await getMagicEdenSalesSnapshot(minutes);\n    const snapshot = snapshotData.sales;
     const cutoff = Date.now() - minutes * 60000;
     const sales = snapshot.filter(sale => !sale.time || new Date(sale.time).getTime() >= cutoff);
     const groups = new Map();
@@ -567,18 +734,18 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, bitqueryRequest:'fulfilled', decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.groups.length, decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
       note:salesData.sales.length===0?'Bitquery returned zero decoded Magic Eden NFT trades in this time window.':null };
     res.json({ success:true, minutes, collections, activeCollections:collections.length, directoryCount:collections.length,
       directoryPages:1, directoryHasMore:false, sales:salesData.sales, salesDiagnostics, providerErrors:{},
-      sources:{ sales:'Bitquery V2 / Magic Eden M2 + MMM', collectionMetadata:'Magic Eden public Solana API + optional QuickNode Metaplex DAS' },
+      sources:{ sales:'Magic Eden public Solana API (popular collections + per-collection activities)', collectionMetadata:'Magic Eden public Solana API + optional QuickNode Metaplex DAS' },
       limitations:[
         'Collection cards are grouped by Magic Eden collection symbol or on-chain collection address, never by an individual NFT name.',
         'Magic Eden public read endpoints are rate-limited; collection metadata is cached.',
         'Unresolved assets remain in recent sales and diagnostics but are not shown as collections.',
-        'API.SH credits are not required for the main feed, collection links, listings, or activities.'
+        'Free-source coverage is limited to the popular collections returned by Magic Eden; it is not a complete global M2 + MMM trade index.'
       ] });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
@@ -621,13 +788,13 @@ app.get('/api/market/collection/:symbol/listings', async (req, res) => {
 });
 app.get('/api/launches/recent', async (req, res) => {
   try {
-    const data = await getRecentSolanaMints();
+    const data = await getRecentSolanaMintsFree();
     res.json({ success: true, ...data });
   } catch (error) {
-    console.error('QuickNode launch discovery failed:', error.status || 'network', error.message);
+    console.error('Free-source launch discovery failed:', error.status || 'network', error.message);
     res.status(error.status || 502).json({
       success: false,
-      source: 'QuickNode Metaplex DAS',
+      source: 'Solana public RPC + QuickNode Metaplex DAS',
       error: error.message
     });
   }
