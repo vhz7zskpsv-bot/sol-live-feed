@@ -136,44 +136,91 @@ async function quicknodeRpc(method, params) {
 async function getRecentSolanaMints() {
   if (launchCache.data && Date.now() - launchCache.at < 45000) return launchCache.data;
   if (!QUICKNODE_RPC_URL) return { configured: false, scannedAt: null, assets: [], collections: [], note: 'Add QUICKNODE_RPC_URL to enable Solana mint discovery.' };
-  const interfaces = ['V1_NFT', 'V2_NFT', 'ProgrammableNFT', 'MplCoreAsset'];
-  const batches = await Promise.all(interfaces.map(async assetInterface => {
-    try {
-      const result = await quicknodeRpc('searchAssets', {
-        interface: assetInterface,
-        sortBy: { sortBy: 'created', sortDirection: 'desc' },
-        limit: 40,
-        options: { showCollectionMetadata: true }
-      });
-      return Array.isArray(result?.items) ? result.items : [];
-    } catch (error) {
-      console.error('QuickNode searchAssets failed for', assetInterface, error.status || 'network', error.message);
-      return [];
+  if (!BITQUERY_CLIENT_ID || !BITQUERY_CLIENT_SECRET) {
+    return { configured: false, scannedAt: null, assets: [], collections: [], note: 'Bitquery credentials are required for recent mint discovery.' };
+  }
+
+  // Discover creation instructions across Token Metadata (standard NFTs),
+  // Bubblegum (compressed NFTs), and MPL Core. This is deliberately separate
+  // from the marketplace sales/collection pipeline.
+  const tokenMetadataProgram = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
+  const bubblegumProgram = 'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY';
+  const coreProgram = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
+  const query = 'query { Solana { Instructions(limit: {count: 100}, orderBy: {descending: Block_Time}, where: {Transaction: {Result: {Success: true}}, any: [' +
+    '{Instruction: {Program: {Address: {is: "' + tokenMetadataProgram + '"}, Method: {in: ["CreateMetadataAccount", "CreateMetadataAccountV2", "CreateMetadataAccountV3", "CreateV1"]}}}} ' +
+    '{Instruction: {Program: {Address: {is: "' + bubblegumProgram + '"}, Method: {in: ["MintV1", "MintToCollectionV1", "MintV2"]}}}} ' +
+    '{Instruction: {Program: {Address: {is: "' + coreProgram + '"}, Method: {in: ["create", "createV1"]}}}}' +
+    ']}) { Block { Time } Transaction { Signature Signer } Instruction { Accounts { Address } Logs Program { Address Method AccountNames } } } } }';
+  const payload = await bitqueryGraphql(query);
+  if (payload.errors?.length) {
+    const error = new Error(payload.errors[0].message || 'Bitquery mint discovery query failed');
+    error.details = payload.errors;
+    throw error;
+  }
+  const rows = payload.data?.Solana?.Instructions || [];
+  const candidates = new Map();
+  for (const row of rows) {
+    const instruction = row.Instruction || {};
+    const program = instruction.Program || {};
+    const programAddress = program.Address || '';
+    const method = program.Method || '';
+    const accounts = (instruction.Accounts || []).map(x => x?.Address).filter(Boolean);
+    const names = (program.AccountNames || []).map(x => String(x || '').toLowerCase());
+    let assetId = null;
+    let standard = 'NFT';
+
+    if (programAddress === bubblegumProgram) {
+      standard = 'cNFT';
+      const logs = Array.isArray(instruction.Logs) ? instruction.Logs.join('\n') : String(instruction.Logs || '');
+      const match = logs.match(/Leaf asset ID:\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+      if (match) assetId = match[1];
+    } else if (programAddress === coreProgram) {
+      standard = 'MPL Core';
+      const namedIndex = names.findIndex(x => x === 'asset' || x === 'asset_account');
+      assetId = namedIndex >= 0 ? accounts[namedIndex] : accounts[0] || null;
+    } else if (programAddress === tokenMetadataProgram) {
+      const namedIndex = names.findIndex(x => x === 'mint');
+      assetId = namedIndex >= 0 ? accounts[namedIndex] : accounts[1] || null;
     }
-  }));
-  const seen = new Set();
-  const assets = batches.flat().filter(asset => {
-    const id = asset?.id;
-    if (!id || seen.has(id)) return false;
-    seen.add(id); return true;
-  }).map(asset => {
-    const metadata = asset.content?.metadata || {};
-    const file = (asset.content?.files || []).find(x => x.mime?.startsWith('image/')) || (asset.content?.files || [])[0];
-    const collection = (asset.grouping || []).find(x => x.group_key === 'collection');
-    const creators = (asset.creators || []).map(x => x.address).filter(Boolean);
-    return {
-      id: asset.id, name: metadata.name || 'Unnamed NFT', symbol: metadata.symbol || '',
-      image: file?.uri || null, interface: asset.interface || 'NFT',
-      collectionAddress: collection?.group_value || null,
-      collectionName: collection?.collection_metadata?.name || collection?.name || null,
-      collectionImage: collection?.collection_metadata?.image || null,
-      verified: Boolean(collection?.verified), creators,
-      createdAt: asset.created_at || asset.createdAt || null,
-      printCurrentSupply: asset.supply?.print_current_supply ?? null,
-      printMaxSupply: asset.supply?.print_max_supply ?? null,
-      mint: asset.id
-    };
-  }).sort((a,b) => (new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
+    if (!assetId || candidates.has(assetId)) continue;
+    candidates.set(assetId, {
+      id: assetId, standard, method, signature: row.Transaction?.Signature || null,
+      creator: row.Transaction?.Signer || null, createdAt: row.Block?.Time || null
+    });
+  }
+
+  // QuickNode's DAS searchAssets is a filtered search, not a global mint feed.
+  // Hydrate IDs discovered from Bitquery one-by-one to respect the endpoint's
+  // 2 requests/second limit and avoid the previous parallel 429 failures.
+  const assets = [];
+  const discovered = [...candidates.values()].slice(0, 30);
+  for (const candidate of discovered) {
+    try {
+      const asset = await quicknodeRpc('getAsset', { id: candidate.id, options: { showCollectionMetadata: true } });
+      if (!asset?.id) continue;
+      const metadata = asset.content?.metadata || {};
+      const file = (asset.content?.files || []).find(x => x.mime?.startsWith('image/')) || (asset.content?.files || [])[0];
+      const collection = (asset.grouping || []).find(x => x.group_key === 'collection');
+      const creators = (asset.creators || []).map(x => x.address).filter(Boolean);
+      assets.push({
+        id: asset.id, name: metadata.name || 'Unnamed NFT', symbol: metadata.symbol || '',
+        image: file?.uri || null, interface: asset.interface || candidate.standard,
+        collectionAddress: collection?.group_value || null,
+        collectionName: collection?.collection_metadata?.name || collection?.name || null,
+        collectionImage: collection?.collection_metadata?.image || null,
+        verified: Boolean(collection?.verified), creators,
+        createdAt: candidate.createdAt || asset.created_at || asset.createdAt || null,
+        printCurrentSupply: asset.supply?.print_current_supply ?? null,
+        printMaxSupply: asset.supply?.print_max_supply ?? null,
+        mint: asset.id, standard: candidate.standard, mintMethod: candidate.method,
+        transaction: candidate.signature, creator: candidate.creator
+      });
+    } catch (error) {
+      console.error('QuickNode getAsset hydration failed for', candidate.standard, error.status || 'network', error.message);
+    }
+    await new Promise(resolve => setTimeout(resolve, 550));
+  }
+
   const grouped = new Map();
   for (const asset of assets) {
     const key = asset.collectionAddress || 'unverified:' + (asset.creators[0] || asset.id);
@@ -188,17 +235,22 @@ async function getRecentSolanaMints() {
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
   }
-  const collections = [...grouped.values()].sort((a,b) => new Date(b.latestMintAt || 0) - new Date(a.latestMintAt || 0));
-  await Promise.all(collections.filter(x => x.collectionAddress).slice(0, 20).map(async group => {
-    try {
-      const result = await quicknodeRpc('getAssetsByGroup', { groupKey: 'collection', groupValue: group.collectionAddress, limit: 1, options: { showCollectionMetadata: true } });
-      if (Number.isFinite(Number(result?.total))) group.mintedCount = Number(result.total);
-    } catch (error) { console.error('QuickNode collection count failed:', error.status || 'network', error.message); }
-  }));
-  const data = { configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections, note: 'Minted count is indexed assets in each collection. Maximum supply is shown only when the launch program exposes it; otherwise it is not disclosed.' };
-  launchCache.at = Date.now(); launchCache.data = data; return data;
+  const collections = [...grouped.values()].sort((a,b) => new Date(b.latestMintAt || 0).getTime() - new Date(a.latestMintAt || 0).getTime());
+  const data = {
+    configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections,
+    diagnostics: {
+      source: 'Bitquery Solana Instructions + QuickNode Metaplex DAS',
+      instructionsFound: rows.length, uniqueAssetCandidates: candidates.size,
+      hydratedAssets: assets.length, candidatesHydrated: discovered.length,
+      standards: ['standard Token Metadata NFTs', 'compressed NFTs (Bubblegum, when the transaction log exposes Leaf asset ID)', 'MPL Core'],
+      note: 'Only successfully hydrated assets are shown. Bubblegum mints without a decoded Leaf asset ID are not yet resolvable by this feed.'
+    },
+    note: 'Recent creations are discovered from on-chain program instructions and hydrated through DAS. Collection counts are observed mints in this scan, not total collection supply.'
+  };
+  launchCache.at = Date.now();
+  launchCache.data = data;
+  return data;
 }
-
 function findArray(value, predicate, depth = 0) {
   if (!value || depth > 5) return [];
   if (Array.isArray(value)) {
