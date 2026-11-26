@@ -105,7 +105,10 @@ async function apiShGet(path, query = {}) {
 
 const directoryCache = { at: 0, data: null };
 const salesCache = new Map();
+const salesPending = new Map();
+let bitquerySalesSnapshot = { at: 0, data: null, pending: null };
 const collectionLookupCache = new Map();
+const collectionLookupPending = new Map();
 const listingsCache = new Map();
 const activitiesCache = new Map();
 const launchCache = { at: 0, data: null };
@@ -253,7 +256,7 @@ function normalizeCollection(x) {
 }
 async function magicEdenGet(path, query = {}) {
   const run = async () => {
-    const wait = Math.max(0, 550 - (Date.now() - magicEdenLastRequestAt));
+    const wait = Math.max(0, 800 - (Date.now() - magicEdenLastRequestAt));
     if (wait) await new Promise(resolve => setTimeout(resolve, wait));
     magicEdenLastRequestAt = Date.now();
     const url = new URL(MAGIC_EDEN_API_BASE + path);
@@ -304,11 +307,13 @@ async function getMagicEdenCollectionDetails(symbol) {
   const key = String(symbol).toLowerCase(), cached = collectionDetailsCache.get(key);
   if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) return cached.data;
   try {
+    // Use the single cached collection index. Do not fan out to one /collections/:symbol
+    // request per NFT group; that was exhausting Magic Eden's public rate limit.
     const index = await getMagicEdenCollectionsIndex();
-    let data = index.get(key);
+    const data = index.get(key);
     if (!data) {
-      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol));
-      data = raw?.collection || raw?.data || raw;
+      collectionDetailsCache.set(key, { at:Date.now(), data:null });
+      return null;
     }
     const result = {
       collectionSymbol: pickText(data?.symbol, data?.collectionSymbol, symbol),
@@ -327,71 +332,116 @@ async function getMagicEdenCollectionDetails(symbol) {
 }
 async function lookupCollectionFromMint(mint) {
   if (!mint) return null;
-  const cached = collectionLookupCache.get(mint), cacheAge = cached?.data ? 6 * 60 * 60 * 1000 : 5 * 60 * 1000;
+  const cached = collectionLookupCache.get(mint), cacheAge = cached?.data ? 6 * 60 * 60 * 1000 : 5 *  60 * 1000;
   if (cached && Date.now() - cached.at < cacheAge) return cached.data;
-  let result = null;
-  try {
-    const token = await magicEdenGet('/tokens/' + encodeURIComponent(mint));
-    const fromToken = readMagicEdenCollection(token?.token || token?.nft || token?.item || token);
-    if (fromToken.collectionSymbol) {
-      const details = await getMagicEdenCollectionDetails(fromToken.collectionSymbol);
-      result = { ...fromToken, ...(details || {}), collectionSymbol: fromToken.collectionSymbol,
-        name: details?.name || fromToken.name || fromToken.collectionSymbol,
-        image: details?.image || fromToken.image || null,
-        collectionAddress: fromToken.collectionAddress || details?.collectionAddress || null,
-        source: 'Magic Eden public API' };
-    } else if (fromToken.collectionAddress || fromToken.name || fromToken.image) result = { ...fromToken, source: 'Magic Eden public API' };
-  } catch (error) { console.error('Magic Eden token collection lookup failed:', error.status || 'network', error.message); }
-  if (!result?.collectionSymbol && (!result?.collectionAddress || !result?.name || !result?.image)) {
+  if (collectionLookupPending.has(mint)) return collectionLookupPending.get(mint);
+
+  const pending = (async () => {
+    let result = null;
     try {
-      const asset = await quicknodeRpc('getAsset', { id: mint, options: { showCollectionMetadata: true } });
-      const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection'), cm = grouping?.collection_metadata || {};
-      const das = grouping?.group_value ? { collectionAddress: grouping.group_value, name: cm.name || grouping.name || null,
-        onChainSymbol: cm.symbol || null, image: cm.image || null, verified: Boolean(grouping.verified), source: 'QuickNode Metaplex DAS' } : null;
-      if (das) result = { ...(result || {}), ...das, collectionSymbol: result?.collectionSymbol || null, onChainSymbol: result?.onChainSymbol || das.onChainSymbol || null,
-        name: result?.name || das.name || null, image: result?.image || das.image || null };
-    } catch (error) { console.error('QuickNode DAS collection lookup failed:', error.status || 'network', error.message); }
-  }
-  collectionLookupCache.set(mint, { at: Date.now(), data: result }); return result;
+      const token = await magicEdenGet('/tokens/' + encodeURIComponent(mint));
+      const fromToken = readMagicEdenCollection(token?.token || token?.nft || token?.item || token);
+      if (fromToken.collectionSymbol) {
+        const details = await getMagicEdenCollectionDetails(fromToken.collectionSymbol);
+        result = { ...fromToken, ...(details || {}), collectionSymbol: fromToken.collectionSymbol,
+          name: details?.name || fromToken.name || fromToken.collectionSymbol.replace(/[_-]+/g, ' '),
+          image: details?.image || fromToken.image || null,
+          collectionAddress: fromToken.collectionAddress || details?.collectionAddress || null,
+          source: 'Magic Eden public API' };
+      } else if (fromToken.collectionAddress && (fromToken.name || fromToken.image)) {
+        result = { ...fromToken, source: 'Magic Eden public API' };
+      }
+    } catch (error) {
+      console.error('Magic Eden token collection lookup failed:', error.status || 'network', error.message);
+    }
+    if (!result?.collectionSymbol && (!result?.collectionAddress || !result?.name || !result?.image)) {
+      try {
+        const asset = await quicknodeRpc('getAsset', { id: mint, options: { showCollectionMetadata: true } });
+        const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection'), cm = grouping?.collection_metadata || {};
+        const das = grouping?.group_value ? { collectionAddress: grouping.group_value, name: cm.name || grouping.name || null,
+          onChainSymbol: cm.symbol || null, image: cm.image || null, verified: Boolean(grouping.verified), source: 'QuickNode Metaplex DAS' } : null;
+        if (das) result = { ...(result || {}), ...das, collectionSymbol: result?.collectionSymbol || null, onChainSymbol: result?.onChainSymbol || das.onChainSymbol || null,
+          name: result?.name || das.name || null, image: result?.image || das.image || null };
+      } catch (error) { console.error('QuickNode DAS collection lookup failed:', error.status || 'network', error.message); }
+    }
+    collectionLookupCache.set(mint, { at: Date.now(), data: result });
+    return result;
+  })();
+  collectionLookupPending.set(mint, pending);
+  try { return await pending; }
+  finally { collectionLookupPending.delete(mint); }
 }
-async function getGlobalNftSales(minutes) {
-  const old = salesCache.get(minutes);
-  if (old && Date.now() - old.at < 10000) return old.data;
-  const since = new Date(Date.now() - minutes * 60000).toISOString();
-  const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress CollectionAddress } Amount Side { Amount Currency { Symbol MintAddress } } } } } }';
-  const payload = await bitqueryGraphql(query);
-  if (payload.errors?.length) { const e = new Error(payload.errors[0].message); e.details = payload.errors; throw e; }
-  const sales = (payload.data?.Solana?.DEXTradeByTokens || []).map(row => {
-    const t = row.Trade || {};
-    return { time: row.Block?.Time || null, signature: row.Transaction?.Signature || null,
-      symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Name || t.Currency?.Symbol || 'Unknown',
-      mint: t.Currency?.MintAddress || null, collectionAddress: t.Currency?.CollectionAddress || null,
-      nftAmount: t.Amount ?? null, price: t.Side?.Amount ?? null,
-      priceCurrency: t.Side?.Currency?.Symbol || null, priceCurrencyMint: t.Side?.Currency?.MintAddress || null,
-      marketplace: t.Dex?.ProtocolName || t.Dex?.ProtocolFamily || 'Magic Eden' };
+async function getBitquerySalesSnapshot() {
+  if (bitquerySalesSnapshot.data && Date.now() - bitquerySalesSnapshot.at < 60000) return bitquerySalesSnapshot.data;
+  if (bitquerySalesSnapshot.pending) return bitquerySalesSnapshot.pending;
+  bitquerySalesSnapshot.pending = (async () => {
+    // Fetch one 24-hour snapshot and derive 5m/15m/1h/24h windows locally.
+    // Switching dashboard filters therefore does not create four Bitquery requests.
+    const since = new Date(Date.now() - 1440 * 60000).toISOString();
+    const query = 'query { Solana { DEXTradeByTokens(limit: {count: 250}, orderBy: {descending: Block_Time}, where: {Block: {Time: {since: "' + since + '"}}, Trade: {Currency: {Fungible: false}, Dex: {ProtocolFamily: {is: "MagicEden"}}}, Transaction: {Result: {Success: true}}}) { Block { Time } Transaction { Signature } Trade { Dex { ProtocolFamily ProtocolName } Currency { Name Symbol MintAddress CollectionAddress } Amount Side { Amount Currency { Symbol MintAddress } } } } } }';
+    const payload = await bitqueryGraphql(query);
+    if (payload.errors?.length) { const e = new Error(payload.errors[0].message); e.details = payload.errors; throw e; }
+    const sales = (payload.data?.Solana?.DEXTradeByTokens || []).map(row => {
+      const t = row.Trade || {};
+      return { time: row.Block?.Time || null, signature: row.Transaction?.Signature || null,
+        symbol: t.Currency?.Symbol || 'Unknown', name: t.Currency?.Name || t.Currency?.Symbol || 'Unknown',
+        mint: t.Currency?.MintAddress || null, collectionAddress: t.Currency?.CollectionAddress || null,
+        nftAmount: t.Amount ?? null, price: t.Side?.Amount ?? null,
+        priceCurrency: t.Side?.Currency?.Symbol || null, priceCurrencyMint: t.Side?.Currency?.MintAddress || null,
+        marketplace: t.Dex?.ProtocolName || t.Dex?.ProtocolFamily || 'Magic Eden' };
+    });
+    bitquerySalesSnapshot = { at: Date.now(), data: sales, pending: null };
+    return sales;
+  })().catch(error => {
+    bitquerySalesSnapshot.pending = null;
+    throw error;
   });
-  const groups = new Map();
-  for (const sale of sales) {
-    const key = sale.collectionAddress ? 'collection:' + String(sale.collectionAddress).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol);
-    const g = groups.get(key) || { key, collectionAddress: sale.collectionAddress, sampleMint: sale.mint,
-      symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
-      lastSale: sale.time, marketplace: sale.marketplace };
-    g.salesCount++;
-    if ((['SOL','WSOL'].includes(String(sale.priceCurrency || '').toUpperCase()) || sale.priceCurrencyMint === 'So11111111111111111111111111111111111111112') && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
-    if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
-    groups.set(key, g);
-  }
-  const lookupCandidates = [...groups.values()]
-    .filter(g => g.sampleMint)
-    .sort((a, b) => b.salesCount - a.salesCount)
-    .slice(0, 50);
-  await Promise.all(lookupCandidates.map(async g => {
-    g.collectionMeta = await lookupCollectionFromMint(g.sampleMint);
-  }));
-  const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
-  salesCache.set(minutes, { at: Date.now(), data }); return data;
+  return bitquerySalesSnapshot.pending;
 }
 
+async function getGlobalNftSales(minutes) {
+  const old = salesCache.get(minutes);
+  if (old && Date.now() - old.at < 45000) return old.data;
+  if (salesPending.has(minutes)) return salesPending.get(minutes);
+
+  const pending = (async () => {
+    const snapshot = await getBitquerySalesSnapshot();
+    const cutoff = Date.now() - minutes * 60000;
+    const sales = snapshot.filter(sale => !sale.time || new Date(sale.time).getTime() >= cutoff);
+    const groups = new Map();
+    for (const sale of sales) {
+      const key = sale.collectionAddress ? 'collection:' + String(sale.collectionAddress).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol);
+      const g = groups.get(key) || { key, collectionAddress: sale.collectionAddress, sampleMint: sale.mint,
+        symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
+        lastSale: sale.time, marketplace: sale.marketplace };
+      g.salesCount++;
+      if ((['SOL','WSOL'].includes(String(sale.priceCurrency || '').toUpperCase()) || sale.priceCurrencyMint === 'So11111111111111111111111111111111111111112') && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
+      if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
+      groups.set(key, g);
+    }
+    const lookupCandidates = [...groups.values()]
+      .filter(g => g.sampleMint)
+      .sort((a, b) => b.salesCount - a.salesCount)
+      .slice(0, 50);
+
+    // Resolve the highest-volume groups before responding; finish the rest in the
+    // background so the HTTP request stays short. Per-mint single-flight + cache
+    // prevents duplicate lookups when windows are switched or requests overlap.
+    await Promise.all(lookupCandidates.slice(0, 16).map(async g => {
+      g.collectionMeta = await lookupCollectionFromMint(g.sampleMint);
+    }));
+    for (const g of lookupCandidates.slice(16)) {
+      lookupCollectionFromMint(g.sampleMint).catch(() => null);
+    }
+
+    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol) };
+    salesCache.set(minutes, { at: Date.now(), data });
+    return data;
+  })();
+  salesPending.set(minutes, pending);
+  try { return await pending; }
+  finally { salesPending.delete(minutes); }
+}
 function proxyApiSh(path, allowedParams) {
   return async (req, res) => {
     try {
