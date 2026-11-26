@@ -11,6 +11,9 @@ const BITQUERY_CLIENT_SECRET = process.env.BITQUERY_CLIENT_SECRET;
 const BITQUERY_TOKEN_URL = 'https://oauth2.bitquery.io/oauth2/token';
 const BITQUERY_GRAPHQL_URL = 'https://streaming.bitquery.io/graphql';
 const QUICKNODE_RPC_URL = process.env.QUICKNODE_RPC_URL;
+const MAGIC_EDEN_API_BASE = 'https://api-mainnet.magiceden.dev/v2';
+let magicEdenQueue = Promise.resolve();
+let magicEdenLastRequestAt = 0;
 let bitqueryToken = null;
 let bitqueryTokenExpiresAt = 0;
 
@@ -248,37 +251,86 @@ function normalizeCollection(x) {
     listedCount: x.listedCount ?? x.listed_count ?? x.listed ?? null,
     verified: x.isVerified ?? x.verified ?? false, collectionAddress, raw: x };
 }
-async function lookupCollectionFromMint(mint) {
-  if (!mint) return null;
-  const cached = collectionLookupCache.get(mint);
-  if (cached && Date.now() - cached.at < 3600000) return cached.data;
-  if (!QUICKNODE_RPC_URL) return null;
+async function magicEdenGet(path, query = {}) {
+  const run = async () => {
+    const wait = Math.max(0, 550 - (Date.now() - magicEdenLastRequestAt));
+    if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+    magicEdenLastRequestAt = Date.now();
+    const url = new URL(path, MAGIC_EDEN_API_BASE);
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== null && String(value).length) url.searchParams.set(key, String(value));
+    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) { const error = new Error(body?.error || body?.message || 'Magic Eden returned HTTP ' + response.status); error.status = response.status; throw error; }
+    return body;
+  };
+  const pending = magicEdenQueue.then(run, run);
+  magicEdenQueue = pending.then(() => undefined, () => undefined);
+  return pending;
+}
+function pickText(...values) { return values.find(value => typeof value === 'string' && value.trim())?.trim() || null; }
+function readMagicEdenCollection(token) {
+  const collection = token?.collection && typeof token.collection === 'object' ? token.collection : {};
+  const onChain = token?.onChainCollection || token?.on_chain_collection || {};
+  return {
+    collectionSymbol: pickText(token?.collectionSymbol, token?.collection_symbol, token?.collectionSlug, token?.collection_slug, collection.symbol, collection.collectionSymbol, collection.collection_symbol, collection.slug, typeof token?.collection === 'string' ? token.collection : null),
+    collectionAddress: pickText(token?.collectionAddress, token?.collection_address, collection.address, collection.key, onChain.address, onChain.key, onChain.collectionAddress),
+    name: pickText(token?.collectionName, token?.collection_name, collection.name, collection.title, onChain.name),
+    image: pickText(token?.collectionImage, token?.collection_image, collection.image, collection.imageUrl, collection.image_url, onChain.image),
+    verified: Boolean(collection.verified || onChain.verified)
+  };
+}
+const collectionDetailsCache = new Map();
+async function getMagicEdenCollectionDetails(symbol) {
+  if (!symbol) return null;
+  const key = String(symbol).toLowerCase(), cached = collectionDetailsCache.get(key);
+  if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) return cached.data;
   try {
-    const asset = await quicknodeRpc('getAsset', {
-      id: mint,
-      options: { showCollectionMetadata: true }
-    });
-    const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection');
-    const metadata = asset?.content?.metadata || {};
-    const files = asset?.content?.files || [];
-    const imageFile = files.find(x => x?.mime?.startsWith('image/')) || files[0];
-    const collectionMetadata = grouping?.collection_metadata || {};
-    const result = grouping?.group_value ? {
-      collectionAddress: grouping.group_value,
-      name: collectionMetadata.name || grouping.name || metadata.collection?.name || null,
-      symbol: collectionMetadata.symbol || metadata.symbol || null,
-      image: collectionMetadata.image || imageFile?.uri || null,
-      verified: Boolean(grouping.verified)
-    } : null;
-    collectionLookupCache.set(mint, { at: Date.now(), data: result });
-    return result;
+    const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol));
+    const data = raw?.collection || raw?.data || raw;
+    const result = {
+      collectionSymbol: pickText(data?.symbol, data?.collectionSymbol, symbol),
+      name: pickText(data?.name, data?.title, data?.collectionName),
+      image: pickText(data?.image, data?.imageUrl, data?.imageURL, data?.imageURI, data?.logo),
+      collectionAddress: pickText(data?.collectionAddress, data?.collection_address, data?.mintAddress),
+      floorPrice: data?.floorPrice ?? data?.floor_price ?? null,
+      listedCount: data?.listedCount ?? data?.listed_count ?? null,
+      verified: Boolean(data?.isVerified || data?.verified)
+    };
+    collectionDetailsCache.set(key, { at: Date.now(), data: result }); return result;
   } catch (error) {
-    console.error('QuickNode DAS collection lookup failed:', error.status || 'network', error.message);
-    collectionLookupCache.set(mint, { at: Date.now(), data: null });
-    return null;
+    console.error('Magic Eden collection metadata failed:', symbol, error.status || 'network', error.message);
+    collectionDetailsCache.set(key, { at: Date.now(), data: null }); return null;
   }
 }
-
+async function lookupCollectionFromMint(mint) {
+  if (!mint) return null;
+  const cached = collectionLookupCache.get(mint), cacheAge = cached?.data ? 6 * 60 * 60 * 1000 : 5 * 60 * 1000;
+  if (cached && Date.now() - cached.at < cacheAge) return cached.data;
+  let result = null;
+  try {
+    const token = await magicEdenGet('/tokens/' + encodeURIComponent(mint));
+    const fromToken = readMagicEdenCollection(token?.token || token?.nft || token?.item || token);
+    if (fromToken.collectionSymbol) {
+      const details = await getMagicEdenCollectionDetails(fromToken.collectionSymbol);
+      result = { ...fromToken, ...(details || {}), collectionSymbol: fromToken.collectionSymbol,
+        name: details?.name || fromToken.name || fromToken.collectionSymbol,
+        image: details?.image || fromToken.image || null,
+        collectionAddress: fromToken.collectionAddress || details?.collectionAddress || null,
+        source: 'Magic Eden public API' };
+    } else if (fromToken.collectionAddress || fromToken.name || fromToken.image) result = { ...fromToken, source: 'Magic Eden public API' };
+  } catch (error) { console.error('Magic Eden token collection lookup failed:', error.status || 'network', error.message); }
+  if (!result?.collectionAddress || !result?.name || !result?.image) {
+    try {
+      const asset = await quicknodeRpc('getAsset', { id: mint, options: { showCollectionMetadata: true } });
+      const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection'), cm = grouping?.collection_metadata || {};
+      const das = grouping?.group_value ? { collectionAddress: grouping.group_value, name: cm.name || grouping.name || null,
+        collectionSymbol: cm.symbol || null, image: cm.image || null, verified: Boolean(grouping.verified), source: 'QuickNode Metaplex DAS' } : null;
+      if (das) result = { ...(result || {}), ...das, collectionSymbol: result?.collectionSymbol || das.collectionSymbol || null,
+        name: result?.name || das.name || null, image: result?.image || das.image || null };
+    } catch (error) { console.error('QuickNode DAS collection lookup failed:', error.status || 'network', error.message); }
+  }
+  collectionLookupCache.set(mint, { at: Date.now(), data: result }); return result;
+}
 async function getGlobalNftSales(minutes) {
   const old = salesCache.get(minutes);
   if (old && Date.now() - old.at < 10000) return old.data;
@@ -297,7 +349,7 @@ async function getGlobalNftSales(minutes) {
   });
   const groups = new Map();
   for (const sale of sales) {
-    const key = sale.collectionAddress || sale.symbol;
+    const key = sale.collectionAddress ? 'collection:' + String(sale.collectionAddress).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol);
     const g = groups.get(key) || { key, collectionAddress: sale.collectionAddress, sampleMint: sale.mint,
       symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
       lastSale: sale.time, marketplace: sale.marketplace };
@@ -361,62 +413,45 @@ app.get('/api/bitquery/test', async (req, res) => {
 app.get('/api/market/collections', async (req, res) => {
   const minutes = [5,15,60,1440].includes(Number(req.query.minutes)) ? Number(req.query.minutes) : 15;
   try {
-    const salesData = await getGlobalNftSales(minutes);
-    const collectionsByKey = new Map();
+    const salesData = await getGlobalNftSales(minutes), collectionsByKey = new Map();
     for (const g of salesData.groups) {
-      const meta = g.collectionMeta || {};
-      const address = meta.collectionAddress || g.collectionAddress || null;
-      // Only show assets with a real collection address in the collection directory.
-      // Unresolved individual NFT mints remain in the recent-sales feed and diagnostics.
-      if (!address) continue;
-      const key = 'collection:' + String(address).toLowerCase();
-      // Keep grouping by the real collection address, but show readable metadata.
-      // When DAS metadata is unavailable, fall back to Bitquery's NFT name/symbol
-      // instead of exposing a long mint/collection address in the directory.
-      const symbol = meta.symbol || g.symbol || 'NFT';
-      const name = meta.name || g.name || symbol;
-      const current = collectionsByKey.get(key) || {
-        symbol, name, image: meta.image || null, floorPrice: null, listedCount: null,
-        verified: Boolean(meta.verified), collectionAddress: address,
-        sampleMint: g.sampleMint || null, salesCount: 0, volumeSol: 0,
-        lastSale: null, marketplace: g.marketplace || 'Magic Eden',
-        collectionResolved: Boolean(address)
-      };
-      current.salesCount += Number(g.salesCount || 0);
-      current.volumeSol += Number(g.volumeSol || 0);
-      if (!current.sampleMint && g.sampleMint) current.sampleMint = g.sampleMint;
+      const meta = g.collectionMeta || {}, address = meta.collectionAddress || g.collectionAddress || null;
+      const marketSymbol = meta.collectionSymbol || null;
+      if (!address && !marketSymbol) continue;
+      const key = marketSymbol ? 'magiceden:' + String(marketSymbol).toLowerCase() : 'address:' + String(address).toLowerCase();
+      const symbol = marketSymbol || ('COLL-' + String(address).slice(0, 7));
+      const name = meta.name || (marketSymbol ? marketSymbol.replace(/[_-]+/g, ' ') : null);
+      if (!name) continue;
+      const current = collectionsByKey.get(key) || { id:key, symbol, magicEdenSymbol:marketSymbol, name, image:meta.image || null,
+        floorPrice:meta.floorPrice ?? null, listedCount:meta.listedCount ?? null, verified:Boolean(meta.verified),
+        collectionAddress:address, salesCount:0, volumeSol:0, lastSale:null, marketplace:g.marketplace || 'Magic Eden', collectionResolved:true };
+      current.salesCount += Number(g.salesCount || 0); current.volumeSol += Number(g.volumeSol || 0);
+      if (!current.collectionAddress && address) current.collectionAddress = address;
+      if (!current.magicEdenSymbol && marketSymbol) current.magicEdenSymbol = marketSymbol;
       if (!current.image && meta.image) current.image = meta.image;
+      if (meta.floorPrice !== null && meta.floorPrice !== undefined) current.floorPrice = meta.floorPrice;
+      if (meta.listedCount !== null && meta.listedCount !== undefined) current.listedCount = meta.listedCount;
       if (g.lastSale && (!current.lastSale || new Date(g.lastSale) > new Date(current.lastSale))) current.lastSale = g.lastSale;
       collectionsByKey.set(key, current);
     }
-    const collections = [...collectionsByKey.values()]
-      .sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol || a.name.localeCompare(b.name));
-    const resolvedGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionAddress || g.collectionAddress)).length;
-    const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress))
-      .slice(0, 8).map(g => ({ nftSymbol: g.symbol, sampleMint: g.sampleMint, salesCount: g.salesCount }));
-    const salesDiagnostics = {
-      requestedWindowMinutes: minutes, bitqueryRequest: 'fulfilled',
-      decodedSales: salesData.sales.length, groupedNftSymbols: salesData.groups.length,
-      groupsResolvedToCollections: resolvedGroups,
-      groupsNotMatchedToCollections: Math.max(0, salesData.groups.length - resolvedGroups),
-      unresolvedSamples: unresolvedGroups,
-      note: salesData.sales.length === 0 ? 'Bitquery returned zero decoded Magic Eden NFT trades in this time window.' : null
-    };
-    res.json({
-      success: true, minutes, collections, activeCollections: collections.length,
-      directoryCount: null, directoryPages: 0, directoryHasMore: false,
-      sales: salesData.sales, salesDiagnostics, providerErrors: {},
-      sources: {
-        sales: 'Bitquery V2 / Magic Eden M2 + MMM',
-        collectionMetadata: QUICKNODE_RPC_URL ? 'QuickNode Metaplex DAS' : 'Bitquery on-chain collection fields'
-      },
-      limitations: [
-        'Collections are grouped from real sales in the selected time window; inactive collections are not requested.',
-        'QuickNode DAS enriches collection names and images when on-chain collection metadata exists.',
-        'Assets without a resolvable collection address are excluded from the collection directory but remain in recent sales and diagnostics.',
-        'API.SH is not used by the main collections and sales feed. Per-collection listings and detail endpoints still require API.SH credits.'
-      ]
-    });
+    const collections = [...collectionsByKey.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol || a.name.localeCompare(b.name));
+    const resolvedGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol)).length;
+    const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
+    const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
+      .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
+    const salesDiagnostics = { requestedWindowMinutes:minutes, bitqueryRequest:'fulfilled', decodedSales:salesData.sales.length,
+      groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
+      groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
+      note:salesData.sales.length===0?'Bitquery returned zero decoded Magic Eden NFT trades in this time window.':null };
+    res.json({ success:true, minutes, collections, activeCollections:collections.length, directoryCount:collections.length,
+      directoryPages:1, directoryHasMore:false, sales:salesData.sales, salesDiagnostics, providerErrors:{},
+      sources:{ sales:'Bitquery V2 / Magic Eden M2 + MMM', collectionMetadata:'Magic Eden public Solana API + optional QuickNode Metaplex DAS' },
+      limitations:[
+        'Collection cards are grouped by Magic Eden collection symbol or on-chain collection address, never by an individual NFT name.',
+        'Magic Eden public read endpoints are rate-limited; collection metadata is cached.',
+        'Unresolved assets remain in recent sales and diagnostics but are not shown as collections.',
+        'API.SH credits are not required for the main feed, collection links, listings, or activities.'
+      ] });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
     res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
@@ -424,38 +459,32 @@ app.get('/api/market/collections', async (req, res) => {
 });
 app.get('/api/market/collection/:symbol/activities', async (req, res) => {
   const symbol = String(req.params.symbol || '').trim();
-  if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid collection symbol' });
+  if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid Magic Eden collection symbol' });
   const key = symbol.toLowerCase(), cached = activitiesCache.get(key);
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
-    const data = await apiShGet('/magiceden/v1/activities', { symbol, type:'buyNow', limit:40, page:1 });
-    const items = findListingRows(data);
-    const result = { success:true, symbol, source:'API.SH / Magic Eden activity', count:items.length,
-      credits_used:data?.credits_used ?? data?.meta?.credits_used ?? null, items, data };
+    const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset:0, limit:100 });
+    const items = findListingRows(data), result = { success:true, symbol, source:'Magic Eden public Solana API', count:items.length, items, data };
     activitiesCache.set(key, { at:Date.now(), data:result }); res.json(result);
   } catch (error) {
     console.error('Magic Eden collection activities failed:', error.status || 'network', error.message);
-    res.status(error.status || 502).json({ success:false, source:'API.SH Magic Eden activities', error:error.message, details:error.details || undefined });
+    res.status(error.status || 502).json({ success:false, source:'Magic Eden public Solana API', error:error.message, details:error.details || undefined });
   }
 });
-
 app.get('/api/market/collection/:symbol/listings', async (req, res) => {
   const symbol = String(req.params.symbol || '').trim();
-  if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid collection symbol' });
+  if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid Magic Eden collection symbol' });
   const key = symbol.toLowerCase(), cached = listingsCache.get(key);
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
-    const data = await apiShGet('/magiceden/v1/listings', { symbol, offset:0, limit:40, sort:'listPrice', order:'asc', sort_direction:'asc' });
-    const items = findListingRows(data);
-    const result = { success:true, symbol, source:'API.SH / Magic Eden', count:items.length,
-      credits_used:data?.credits_used ?? data?.meta?.credits_used ?? null, items, data };
+    const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/listings', { offset:0, limit:40, sort:'listPrice', sort_direction:'asc', listingAggMode:true });
+    const items = findListingRows(data), result = { success:true, symbol, source:'Magic Eden public Solana API', count:items.length, items, data };
     listingsCache.set(key, { at:Date.now(), data:result }); res.json(result);
   } catch (error) {
     console.error('Magic Eden listings failed:', error.status || 'network', error.message);
-    res.status(error.status || 502).json({ success:false, source:'API.SH Magic Eden listings', error:error.message, details:error.details || undefined });
+    res.status(error.status || 502).json({ success:false, source:'Magic Eden public Solana API', error:error.message, details:error.details || undefined });
   }
 });
-
 app.get('/api/launches/recent', async (req, res) => {
   try {
     const data = await getRecentSolanaMints();
@@ -529,10 +558,5 @@ server.listen(PORT, '0.0.0.0', () => {
     return;
   }
 
-  // One low-cost authentication/configuration probe at startup (1 API.SH credit).
-  apiShGet('/magiceden/v1/collections', { limit: 20 })
-    .then(data => console.log('API.SH authentication OK; collections endpoint responded.',
-      'credits_used:', data?.credits_used ?? 'not reported'))
-    .catch(error => console.error('API.SH startup check failed:',
-      error.status || 'network', error.message));
+  console.log('Sales feed: Bitquery V2. Collection metadata and detail reads: Magic Eden public API.');
 });
