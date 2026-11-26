@@ -568,6 +568,7 @@ async function getMagicEdenSalesSnapshot(minutes) {
   if (cached && Date.now() - cached.at < 60000) return cached.data;
   let popularRows = [];
   let discoverySource = 'Magic Eden popular collections';
+  let directoryPages = 0;
   try {
     const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: cacheKey });
     popularRows = Array.isArray(popularRaw) ? popularRaw :
@@ -575,19 +576,24 @@ async function getMagicEdenSalesSnapshot(minutes) {
   } catch (error) {
     console.warn('Magic Eden popular collections unavailable; falling back to collection directory:', error.status || 'network', error.message);
   }
-  // The popular leaderboard can return an empty payload. Fall back to the
-  // documented public /collections directory instead of treating that as no market activity.
+  // The popular leaderboard can return an empty payload. Page through the
+  // documented public directory so the fallback is not limited to its first 500 entries.
   if (!popularRows.length) {
-    discoverySource = 'Magic Eden public collections directory (fallback)';
-    const directory = await magicEdenGet('/collections', { offset: 0, limit: 500 });
-    popularRows = Array.isArray(directory) ? directory :
-      (directory?.collections || directory?.results || directory?.data || directory?.items || []);
+    discoverySource = 'Magic Eden public collections directory (2-page fallback)';
+    for (const offset of [0, 500]) {
+      const directory = await magicEdenGet('/collections', { offset, limit: 500 });
+      const pageRows = Array.isArray(directory) ? directory :
+        (directory?.collections || directory?.results || directory?.data || directory?.items || []);
+      directoryPages++;
+      popularRows.push(...pageRows);
+      if (pageRows.length < 500) break;
+    }
   }
   const collections = popularRows
     .filter(x => x && (x.symbol || x.collectionSymbol))
     .sort((a, b) => Number(b.volumeAll || b.volume24hr || b.volume_24hr || b.volume_24hr_sol || 0) -
                     Number(a.volumeAll || a.volume24hr || a.volume_24hr || a.volume_24hr_sol || 0))
-    .slice(0, 20);
+    .slice(0, 30);
   const sales = [];
   const errors = [];
   const activityTypeCounts = {};
@@ -639,7 +645,9 @@ async function getMagicEdenSalesSnapshot(minutes) {
       console.error('Magic Eden activity lookup failed for', symbol, error.status || 'network', error.message);
     }
   }
-  const data = { sales, collections, errors, discoverySource, timeRange: cacheKey, sampledCollections: collections.length,
+  const data = { sales, collections, errors, discoverySource, directoryPages,
+    directoryCollectionsAvailable: popularRows.filter(x => x && (x.symbol || x.collectionSymbol)).length,
+    timeRange: cacheKey, sampledCollections: collections.length,
     rawActivityRows, activityTypeCounts, recognizedSaleRows: sales.length };
   magicEdenSalesCache.set(cacheKey, { at: Date.now(), data });
   return data;
@@ -682,7 +690,7 @@ async function getGlobalNftSales(minutes) {
       lookupCollectionFromMint(g.sampleMint).catch(() => null);
     }
 
-    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, rawActivityRows:snapshotData.rawActivityRows || 0, activityTypeCounts:snapshotData.activityTypeCounts || {}, recognizedSaleRows:snapshotData.recognizedSaleRows || 0, errors:snapshotData.errors || [] } };
+    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, directoryPages:snapshotData.directoryPages || 0, directoryCollectionsAvailable:snapshotData.directoryCollectionsAvailable || 0, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, rawActivityRows:snapshotData.rawActivityRows || 0, activityTypeCounts:snapshotData.activityTypeCounts || {}, recognizedSaleRows:snapshotData.recognizedSaleRows || 0, errors:snapshotData.errors || [] } };
     salesCache.set(minutes, { at: Date.now(), data });
     return data;
   })();
@@ -763,7 +771,7 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, directoryPages:salesData.sourceDiagnostics?.directoryPages || 0, directoryCollectionsAvailable:salesData.sourceDiagnostics?.directoryCollectionsAvailable || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
       note:salesData.sales.length===0?(salesData.sourceDiagnostics?.rawActivityRows ? 'Activity records were returned, but no recognized sale event types were found. Check activityTypeCounts.' : 'No activity records were returned for the sampled popular collections.'):null };
