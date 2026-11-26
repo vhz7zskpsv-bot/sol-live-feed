@@ -566,10 +566,28 @@ async function getMagicEdenSalesSnapshot(minutes) {
   const cacheKey = '1d';
   const cached = magicEdenSalesCache.get(cacheKey);
   if (cached && Date.now() - cached.at < 60000) return cached.data;
-  const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: cacheKey });
-  const popularRows = Array.isArray(popularRaw) ? popularRaw :
-    (popularRaw?.collections || popularRaw?.results || popularRaw?.data || popularRaw?.items || []);
-  const collections = popularRows.filter(x => x && (x.symbol || x.collectionSymbol)).slice(0, 12);
+  let popularRows = [];
+  let discoverySource = 'Magic Eden popular collections';
+  try {
+    const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: cacheKey });
+    popularRows = Array.isArray(popularRaw) ? popularRaw :
+      (popularRaw?.collections || popularRaw?.results || popularRaw?.data || popularRaw?.items || []);
+  } catch (error) {
+    console.warn('Magic Eden popular collections unavailable; falling back to collection directory:', error.status || 'network', error.message);
+  }
+  // The popular leaderboard can return an empty payload. Fall back to the
+  // documented public /collections directory instead of treating that as no market activity.
+  if (!popularRows.length) {
+    discoverySource = 'Magic Eden public collections directory (fallback)';
+    const directory = await magicEdenGet('/collections', { offset: 0, limit: 500 });
+    popularRows = Array.isArray(directory) ? directory :
+      (directory?.collections || directory?.results || directory?.data || directory?.items || []);
+  }
+  const collections = popularRows
+    .filter(x => x && (x.symbol || x.collectionSymbol))
+    .sort((a, b) => Number(b.volumeAll || b.volume24hr || b.volume_24hr || b.volume_24hr_sol || 0) -
+                    Number(a.volumeAll || a.volume24hr || a.volume_24hr || a.volume_24hr_sol || 0))
+    .slice(0, 12);
   const sales = [];
   const errors = [];
   const activityTypeCounts = {};
@@ -621,7 +639,7 @@ async function getMagicEdenSalesSnapshot(minutes) {
       console.error('Magic Eden activity lookup failed for', symbol, error.status || 'network', error.message);
     }
   }
-  const data = { sales, collections, errors, timeRange: cacheKey, sampledCollections: collections.length,
+  const data = { sales, collections, errors, discoverySource, timeRange: cacheKey, sampledCollections: collections.length,
     rawActivityRows, activityTypeCounts, recognizedSaleRows: sales.length };
   magicEdenSalesCache.set(cacheKey, { at: Date.now(), data });
   return data;
@@ -664,7 +682,7 @@ async function getGlobalNftSales(minutes) {
       lookupCollectionFromMint(g.sampleMint).catch(() => null);
     }
 
-    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, timeRange:snapshotData.timeRange, errors:snapshotData.errors || [] } };
+    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, errors:snapshotData.errors || [] } };
     salesCache.set(minutes, { at: Date.now(), data });
     return data;
   })();
@@ -745,7 +763,7 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
       note:salesData.sales.length===0?(salesData.sourceDiagnostics?.rawActivityRows ? 'Activity records were returned, but no recognized sale event types were found. Check activityTypeCounts.' : 'No activity records were returned for the sampled popular collections.'):null };
