@@ -632,14 +632,14 @@ async function getGlobalNftSales(minutes) {
       const saleCollectionAddress = sale.collectionAddress || sale.collectionMeta?.collectionAddress || null;\n      const key = saleCollectionAddress ? 'collection:' + String(saleCollectionAddress).toLowerCase() : (sale.collectionSymbol ? 'symbol:' + String(sale.collectionSymbol).toLowerCase() : (sale.mint ? 'mint:' + sale.mint : 'ticker:' + sale.symbol));
       const g = groups.get(key) || { key, collectionAddress: saleCollectionAddress, sampleMint: sale.mint,
         symbol: sale.symbol, name: sale.name, salesCount: 0, volumeSol: 0,
-        lastSale: sale.time, marketplace: sale.marketplace };
+        lastSale: sale.time, marketplace: sale.marketplace, collectionMeta: sale.collectionMeta || null };
       g.salesCount++;
       if ((['SOL','WSOL'].includes(String(sale.priceCurrency || '').toUpperCase()) || sale.priceCurrencyMint === 'So11111111111111111111111111111111111111112') && Number.isFinite(Number(sale.price))) g.volumeSol += Number(sale.price);
       if (sale.time && (!g.lastSale || new Date(sale.time) > new Date(g.lastSale))) g.lastSale = sale.time;
       groups.set(key, g);
     }
     const lookupCandidates = [...groups.values()]
-      .filter(g => g.sampleMint)
+      .filter(g => g.sampleMint && !g.collectionMeta)
       .sort((a, b) => b.salesCount - a.salesCount)
       .slice(0, 50);
 
@@ -737,7 +737,7 @@ app.get('/api/market/collections', async (req, res) => {
     const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
-      note:salesData.sales.length===0?'Bitquery returned zero decoded Magic Eden NFT trades in this time window.':null };
+      note:salesData.sales.length===0?'Magic Eden returned no sale events for the sampled popular collections in this time window.':null };
     res.json({ success:true, minutes, collections, activeCollections:collections.length, directoryCount:collections.length,
       directoryPages:1, directoryHasMore:false, sales:salesData.sales, salesDiagnostics, providerErrors:{},
       sources:{ sales:'Magic Eden public Solana API (popular collections + per-collection activities)', collectionMetadata:'Magic Eden public Solana API + optional QuickNode Metaplex DAS' },
