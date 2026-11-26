@@ -804,15 +804,15 @@ app.get('/api/launches/recent', async (req, res) => {
 
 app.get('/api/config', (req, res) => {
   res.json({
-    provider: 'API.SH / Magic Eden',
-    configured: Boolean(API_SH_KEY),
+    provider: 'Magic Eden public API + Solana public RPC',
+    configured: Boolean(QUICKNODE_RPC_URL),
     mode: 'read-only',
     heliusRequired: false
   });
 });
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', provider: 'api.sh', configured: Boolean(API_SH_KEY) });
+  res.status(200).json({ status: 'ok', provider: 'Magic Eden + Solana public RPC', configured: true });
 });
 
 app.get('/', (req, res) => {
@@ -856,10 +856,6 @@ async function loadData(path,label){
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`NFT Aggregator server running on 0.0.0.0:${PORT}`);
-  if (!API_SH_KEY) {
-    console.error('API_SH_KEY is missing. Add it to the NFT Aggregator Railway service variables.');
-    return;
-  }
-
-  console.log('Sales feed: Bitquery V2. Collection metadata and detail reads: Magic Eden public API.');
+  console.log('Sales feed: Magic Eden public API (popular collections + collection activities).');
+  console.log('Mint discovery: Solana public RPC. Asset metadata hydration: existing QuickNode Metaplex DAS endpoint.');
 });
