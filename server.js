@@ -487,7 +487,13 @@ app.get('/api/market/collection/:symbol/activities', async (req, res) => {
   if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
   try {
     const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset:0, limit:100 });
-    const items = findListingRows(data), result = { success:true, symbol, source:'Magic Eden public Solana API', count:items.length, items, data };
+    const activityRows = findListingRows(data);
+    const items = activityRows.filter(item => {
+      const type = String(item.type || item.activityType || '').toLowerCase();
+      if (['buynow','acceptbid','buy','sale','auctionbuy'].includes(type)) return true;
+      return !type && Boolean(item.buyer && item.seller && (item.price !== undefined || item.amount !== undefined));
+    });
+    const result = { success:true, symbol, source:'Magic Eden public Solana API', count:items.length, items, data };
     activitiesCache.set(key, { at:Date.now(), data:result }); res.json(result);
   } catch (error) {
     console.error('Magic Eden collection activities failed:', error.status || 'network', error.message);
