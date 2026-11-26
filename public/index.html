@@ -15,10 +15,10 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 @media(max-width:600px){.launchGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 9px 10px}main{padding:16px 11px 40px}.header{align-items:flex-start}.headerRight{flex-direction:column;align-items:flex-end}.stats{gap:8px}.stat{padding:12px}.statValue{font-size:19px}.collectionGrid{grid-template-columns:1fr;padding:0 9px 10px}.side{display:flex}.listingGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}.search{min-width:150px;flex:1}.toolbar{padding:11px}.sectionHead{padding:14px}}
 </style></head><body><main>
 <header class="header"><div class="brand"><div class="logo">✦</div><div><h1>Solana NFT Market Pulse</h1><div class="sub">Live collections ranked by real marketplace sales</div></div></div><div class="headerRight"><span class="pill"><i class="liveDot"></i>READ ONLY · LIVE DATA</span><span class="pill">No wallet · No Helius</span></div></header>
-<section class="stats"><div class="stat"><div class="statLabel">Active collections</div><div class="statValue" id="activeCount">—</div><div class="statHint">Collections with sales in selected window</div></div><div class="stat"><div class="statLabel">Recent sales</div><div class="statValue" id="salesCount">—</div><div class="statHint">Decoded Magic Eden trades</div></div><div class="stat"><div class="statLabel">SOL volume</div><div class="statValue" id="volumeSol">—</div><div class="statHint">SOL-denominated sale amounts only</div></div><div class="stat"><div class="statLabel">Data sources</div><div class="statValue" style="font-size:17px">2 APIs</div><div class="statHint">Bitquery + QuickNode DAS</div></div></section>
+<section class="stats"><div class="stat"><div class="statLabel">Active collections</div><div class="statValue" id="activeCount">—</div><div class="statHint">Collections with sales in selected window</div></div><div class="stat"><div class="statLabel">Recent sales</div><div class="statValue" id="salesCount">—</div><div class="statHint">Decoded Magic Eden trades</div></div><div class="stat"><div class="statLabel">SOL volume</div><div class="statValue" id="volumeSol">—</div><div class="statHint">SOL-denominated sale amounts only</div></div><div class="stat"><div class="statLabel">Data sources</div><div class="statValue" style="font-size:17px">2 APIs</div><div class="statHint">Bitquery + Magic Eden public API</div></div></section>
 <section class="panel toolbar"><div class="filters"><span style="color:var(--muted);font-size:11px;margin-right:3px">WINDOW</span><button class="filter" data-min="5">5m</button><button class="filter active" data-min="15">15m</button><button class="filter" data-min="60">1h</button><button class="filter" data-min="1440">24h</button></div><div class="filters"><input id="search" class="search" placeholder="Search collections…"><button class="refresh" id="refresh">↻ Refresh</button></div></section>
 <div class="layout"><section class="panel"><div class="sectionHead"><h2>Collections</h2><span id="collectionCount">Loading…</span></div><div id="collections" class="collectionGrid"><div class="empty">Fetching live collection activity…</div></div><div id="allNotice" class="notice hidden"></div></section>
-<aside class="side"><section class="panel"><div class="sectionHead"><h2>Latest sales</h2><span id="saleWindow">Last 15m</span></div><div id="salesFeed" class="salesList"><div class="empty">Loading real sales…</div></div></section><section class="panel"><div class="sectionHead"><h2>Coverage</h2><span>Source status</span></div><div style="padding:0 15px 15px;color:#91a6c2;font-size:11px;line-height:1.8"><div>● <b style="color:var(--green)">Bitquery V2</b> — Magic Eden M2 + MMM sales</div><div>● <b style="color:var(--green)">QuickNode DAS</b> — on-chain collection metadata</div><div>○ <b style="color:#d5b778">API.SH</b> — optional listings/detail only; not used for collection feed</div><div>○ Chadbot — not used as a data provider</div></div></section></aside></div>
+<aside class="side"><section class="panel"><div class="sectionHead"><h2>Latest sales</h2><span id="saleWindow">Last 15m</span></div><div id="salesFeed" class="salesList"><div class="empty">Loading real sales…</div></div></section><section class="panel"><div class="sectionHead"><h2>Coverage</h2><span>Source status</span></div><div style="padding:0 15px 15px;color:#91a6c2;font-size:11px;line-height:1.8"><div>● <b style="color:var(--green)">Bitquery V2</b> — Magic Eden M2 + MMM sales</div><div>● <b style="color:var(--green)">Magic Eden public API</b> — collection metadata, links, listings & sales</div><div>○ <b style="color:#d5b778">QuickNode DAS</b> — optional on-chain metadata fallback</div><div>○ Chadbot — not used as a data provider</div></div></section></aside></div>
 <section class="panel" style="margin-top:15px"><div class="sectionHead"><h2>New Solana Mints · Unverified Launches</h2><span id="launchStatus">Checking QuickNode…</span></div><div id="launchNotice" class="notice hidden"></div><div id="launchGrid" class="launchGrid"><div class="empty">Loading newest indexed Solana NFT assets…</div></div></section>
 <section id="detail" class="panel detail hidden"><div class="detailTop"><div class="avatar" id="detailAvatar">NFT</div><div><h2 id="detailName">Collection</h2><div class="muted" id="detailMeta"></div></div><div class="detailActions"><a id="magicLink" class="close" target="_blank" rel="noopener" style="text-decoration:none">Open Magic Eden ↗</a><button class="close" id="closeDetail">Close</button></div></div><div class="detailTabs"><button class="detailTab active" id="activeListingsTab">Active Listings</button><button class="detailTab" id="recentSalesTab">Recent Sales</button></div><div class="sectionHead"><h2 id="detailTabTitle">Active Listings</h2><span id="listingCount">Loading…</span></div><div id="listings" class="listingGrid"><div class="empty">Loading collection listings from API.SH…</div></div></section>
 <div class="footer">Read-only public data · No wallet connection · No transactions · No synthetic sales or listing records</div>
@@ -37,9 +37,9 @@ function renderCollections(){
  $('collectionCount').textContent=rows.length+' collections · ranked by sales';
  $('collections').innerHTML=rows.length?rows.map(c=>{
   const avatar=c.image?'<img class="avatar" src="'+escapeHtml(c.image)+'" alt="" loading="lazy">':'<div class="avatar">'+escapeHtml((c.symbol||'NFT').slice(0,3))+'</div>';
-  return '<article class="collection" data-mint="'+escapeHtml(c.sampleMint||'')+'">'+avatar+'<div class="cInfo"><div class="cName">'+escapeHtml(c.name||c.symbol)+'</div><div class="cSymbol">'+escapeHtml(c.symbol)+'</div><div class="cMeta"><span>Floor '+money(c.floorPrice)+' SOL</span><span>'+(c.listedCount===null||c.listedCount===undefined?'Listings —':'Listed '+money(c.listedCount))+'</span></div></div><div class="salesBadge"><strong>'+Number(c.salesCount||0)+'</strong>sales</div></article>'
+  return '<article class="collection" data-collection-id="'+escapeHtml(c.id||c.magicEdenSymbol||'')+'">'+avatar+'<div class="cInfo"><div class="cName">'+escapeHtml(c.name||c.symbol)+'</div><div class="cSymbol">'+escapeHtml(c.symbol)+'</div><div class="cMeta"><span>Floor '+money(c.floorPrice)+' SOL</span><span>'+(c.listedCount===null||c.listedCount===undefined?'Listings —':'Listed '+money(c.listedCount))+'</span></div></div><div class="salesBadge"><strong>'+Number(c.salesCount||0)+'</strong>sales</div></article>'
  }).join(''):'<div class="empty">No collections with sales in this time window.</div>';
- $('collections').querySelectorAll('.collection').forEach(el=>el.addEventListener('click',()=>{if(el.dataset.mint)window.open('https://magiceden.io/item-details/'+encodeURIComponent(el.dataset.mint),'_blank','noopener')}));
+ $('collections').querySelectorAll('.collection').forEach(el=>el.addEventListener('click',()=>openCollection(el.dataset.collectionId)));
 }
 function renderLaunches(data){
  const grid=$('launchGrid');
@@ -63,7 +63,7 @@ async function loadMarket(){
   $('volumeSol').textContent=money(active.reduce((sum,c)=>sum+Number(c.volumeSol||0),0));
   $('saleWindow').textContent='Last '+(selectedMinutes===1440?'24h':selectedMinutes+'m');
   renderCollections();renderSales();
-  const diag=data.salesDiagnostics||{};const diagText='Bitquery window '+selectedMinutes+'m: '+Number(diag.decodedSales||0)+' decoded trades; '+Number(diag.groupsResolvedToCollections||0)+' groups with on-chain collection metadata; '+Number(diag.groupsNotMatchedToCollections||0)+' unresolved groups.';const samples=(diag.unresolvedSamples||[]).slice(0,3).map(x=>'Unmatched NFT ticker '+(x.nftSymbol||'unknown')+' ('+Number(x.salesCount||0)+' sale(s))').join('; ');const errs=Object.entries(data.providerErrors||{}).filter(x=>x[1]).map(x=>x[0]+': '+x[1]);const note=[diagText,diag.note,samples,...(data.limitations||[]),...(errs.length?['Provider issue — '+errs.join(' | ')]:[])].filter(Boolean).join(' ');$('allNotice').textContent=note;$('allNotice').classList.toggle('hidden',!note);
+  const diag=data.salesDiagnostics||{};const diagText='Bitquery window '+selectedMinutes+'m: '+Number(diag.decodedSales||0)+' decoded trades; '+Number(diag.groupsResolvedToCollections||0)+' groups resolved to collection identity; '+Number(diag.groupsResolvedToMagicEden||0)+' mapped to Magic Eden collection pages; '+Number(diag.groupsNotMatchedToCollections||0)+' unresolved groups.';const samples=(diag.unresolvedSamples||[]).slice(0,3).map(x=>'Unmatched NFT ticker '+(x.nftSymbol||'unknown')+' ('+Number(x.salesCount||0)+' sale(s))').join('; ');const errs=Object.entries(data.providerErrors||{}).filter(x=>x[1]).map(x=>x[0]+': '+x[1]);const note=[diagText,diag.note,samples,...(data.limitations||[]),...(errs.length?['Provider issue — '+errs.join(' | ')]:[])].filter(Boolean).join(' ');$('allNotice').textContent=note;$('allNotice').classList.toggle('hidden',!note);
  }catch(e){$('collections').innerHTML='<div class="empty">Could not load marketplace data: '+escapeHtml(e.message)+'</div>';$('salesFeed').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>';$('activeCount').textContent='—';$('salesCount').textContent='—';$('volumeSol').textContent='—'}
 }
 function setDetailTab(tab){
@@ -75,6 +75,7 @@ function setDetailTab(tab){
  else loadCollectionListings(currentCollectionSymbol);
 }
 async function loadCollectionListings(symbol){
+ if(!symbol){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">Magic Eden collection symbol could not be resolved for this on-chain collection. No individual NFT link is shown.</div>';return;}
  $('listings').innerHTML='<div class="empty">Loading active listings from Magic Eden…</div>';$('listingCount').textContent='Loading…';
  try{
   const r=await fetch('/api/market/collection/'+encodeURIComponent(symbol)+'/listings');const data=await r.json();
@@ -93,6 +94,7 @@ async function loadCollectionListings(symbol){
  }catch(e){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
 }
 async function loadCollectionSales(symbol){
+ if(!symbol){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">Magic Eden collection symbol could not be resolved for this on-chain collection.</div>';return;}
  $('listings').innerHTML='<div class="empty">Loading recent completed sales from Magic Eden…</div>';$('listingCount').textContent='Loading…';
  try{
   const r=await fetch('/api/market/collection/'+encodeURIComponent(symbol)+'/activities');const data=await r.json();
@@ -112,11 +114,21 @@ async function loadCollectionSales(symbol){
   }).join(''):'<div class="empty">No completed sales were returned by Magic Eden for this collection. No placeholder sales are shown.</div>';
  }catch(e){$('listingCount').textContent='Unavailable';$('listings').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>'}
 }
-async function openCollection(symbol){
- const c=allCollections.find(x=>String(x.symbol).toLowerCase()===String(symbol).toLowerCase())||{symbol,name:symbol};
- currentCollectionSymbol=symbol;
- $('detail').classList.remove('hidden');$('detailName').textContent=c.name||symbol;$('detailMeta').textContent=symbol+' · '+(c.salesCount||0)+' sales in selected window';
- $('detailAvatar').textContent=(symbol||'NFT').slice(0,3);$('magicLink').href='https://magiceden.io/marketplace/'+encodeURIComponent(symbol);
+async function openCollection(collectionId){
+ const c=allCollections.find(x=>x.id===collectionId||x.collectionAddress===collectionId||x.magicEdenSymbol===collectionId);
+ if(!c)return;
+ currentCollectionSymbol=c.magicEdenSymbol||'';
+ $('detail').classList.remove('hidden');
+ $('detailName').textContent=c.name||'Collection';
+ $('detailMeta').textContent=(c.magicEdenSymbol||'On-chain collection')+' · '+(c.salesCount||0)+' sales in selected window';
+ $('detailAvatar').textContent=(c.symbol||'NFT').slice(0,3);
+ if(currentCollectionSymbol){
+  $('magicLink').href='https://magiceden.io/marketplace/'+encodeURIComponent(currentCollectionSymbol);
+  $('magicLink').classList.remove('hidden');
+ }else{
+  $('magicLink').href='#';
+  $('magicLink').classList.add('hidden');
+ }
  $('detail').scrollIntoView({behavior:'smooth',block:'start'});
  setDetailTab('listings');
 }
