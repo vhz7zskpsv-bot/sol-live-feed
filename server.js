@@ -366,11 +366,13 @@ app.get('/api/market/collections', async (req, res) => {
     for (const g of salesData.groups) {
       const meta = g.collectionMeta || {};
       const address = meta.collectionAddress || g.collectionAddress || null;
-      const key = address ? 'collection:' + String(address).toLowerCase()
-        : 'unresolved:' + String(g.sampleMint || g.symbol).toLowerCase();
-      const fallbackSymbol = g.symbol && g.symbol !== 'Unknown' ? g.symbol : String(g.sampleMint || 'NFT').slice(0,10);
-      const symbol = meta.symbol || (address ? 'collection_' + String(address).slice(0,8) : 'unresolved_' + String(g.sampleMint || fallbackSymbol).slice(0,8));
-      const name = meta.name || (address ? (g.name || 'Solana NFT Collection') : ('Unresolved NFT · ' + (g.name || fallbackSymbol)));
+      // Only show assets with a real collection address in the collection directory.
+      // Unresolved individual NFT mints remain in the recent-sales feed and diagnostics.
+      if (!address) continue;
+      const key = 'collection:' + String(address).toLowerCase();
+      const fallbackSymbol = g.symbol && g.symbol !== 'Unknown' ? g.symbol : String(address).slice(0,10);
+      const symbol = meta.symbol || 'collection_' + String(address).slice(0,8);
+      const name = meta.name || g.name || 'Solana NFT Collection';
       const current = collectionsByKey.get(key) || {
         symbol, name, image: meta.image || null, floorPrice: null, listedCount: null,
         verified: Boolean(meta.verified), collectionAddress: address,
@@ -409,7 +411,7 @@ app.get('/api/market/collections', async (req, res) => {
       limitations: [
         'Collections are grouped from real sales in the selected time window; inactive collections are not requested.',
         'QuickNode DAS enriches collection names and images when on-chain collection metadata exists.',
-        'When collection metadata is absent, the NFT is shown separately as unresolved rather than hidden.',
+        'Assets without a resolvable collection address are excluded from the collection directory but remain in recent sales and diagnostics.',
         'API.SH is not used by the main collections and sales feed. Per-collection listings and detail endpoints still require API.SH credits.'
       ]
     });
