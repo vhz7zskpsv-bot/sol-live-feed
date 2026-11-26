@@ -591,7 +591,7 @@ async function getMagicEdenSalesSnapshot(minutes) {
         const rawTime = item.blockTime ?? item.block_time ?? item.time ?? item.createdAt ?? item.created_at ?? null;
         let time = rawTime;
         if (typeof rawTime === 'number' && rawTime < 1000000000000) time = new Date(rawTime * 1000).toISOString();
-        else if (typeof rawTime === 'string' && /^\\d{10}$/.test(rawTime)) time = new Date(Number(rawTime) * 1000).toISOString();
+        else if (typeof rawTime === 'string' && /^\d{10}$/.test(rawTime)) time = new Date(Number(rawTime) * 1000).toISOString();
         else if (rawTime && !Number.isNaN(Date.parse(rawTime))) time = new Date(rawTime).toISOString();
         const rawPrice = item.priceSol ?? item.price_sol ?? item.price ?? item.amount ?? item.paymentAmount ?? null;
         const price = typeof rawPrice === 'object' && rawPrice ? (rawPrice.sol ?? rawPrice.amount ?? null) : rawPrice;
