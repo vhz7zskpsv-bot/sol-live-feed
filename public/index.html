@@ -39,7 +39,7 @@ function renderCollections(){
   const avatar=c.image?'<img class="avatar" src="'+escapeHtml(c.image)+'" alt="" loading="lazy">':'<div class="avatar">'+escapeHtml((c.symbol||'NFT').slice(0,3))+'</div>';
   return '<article class="collection" data-collection-id="'+escapeHtml(c.id||c.magicEdenSymbol||'')+'">'+avatar+'<div class="cInfo"><div class="cName">'+escapeHtml(c.name||c.symbol)+'</div><div class="cSymbol">'+escapeHtml(c.symbol)+'</div><div class="cMeta"><span>Floor '+money(c.floorPrice)+' SOL</span><span>'+(c.listedCount===null||c.listedCount===undefined?'Listings —':'Listed '+money(c.listedCount))+'</span></div></div><div class="salesBadge"><strong>'+Number(c.salesCount||0)+'</strong>sales</div></article>'
  }).join(''):'<div class="empty">No collections with sales in this time window.</div>';
- $('collections').querySelectorAll('.collection').forEach(el=>el.addEventListener('click',()=>openCollection(el.dataset.collectionId)));
+ $('collections').querySelectorAll('.collection').forEach(el=>el.addEventListener('click',()=>{const c=allCollections.find(x=>x.id===el.dataset.collectionId);if(c?.magicEdenSymbol)window.open('https://magiceden.io/marketplace/'+encodeURIComponent(c.magicEdenSymbol),'_blank','noopener');else openCollection(el.dataset.collectionId)}));
 }
 function renderLaunches(data){
  const grid=$('launchGrid');
