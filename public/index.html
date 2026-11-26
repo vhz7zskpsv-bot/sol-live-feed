@@ -24,7 +24,7 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 <div class="footer">Read-only public data · No wallet connection · No transactions · No synthetic sales or listing records</div>
 </main>
 <script>
-let selectedMinutes=15, allCollections=[], latestSales=[], latestSalesDiagnostics=null, marketRequest=null, marketLoaded=false, currentCollectionSymbol='', currentDetailTab='listings';
+let selectedMinutes=15, allCollections=[], latestSales=[], latestSalesDiagnostics=null, marketRequest=false, marketRefreshQueued=false, marketLoaded=false, currentCollectionSymbol='', currentDetailTab='listings';
 const $=id=>document.getElementById(id);
 function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function short(v){if(!v)return '—';const s=String(v);return s.length>13?s.slice(0,5)+'…'+s.slice(-5):s}
@@ -53,6 +53,8 @@ function renderSales(){
  $('salesFeed').innerHTML=latestSales.length?latestSales.slice(0,18).map(s=>{const href=s.mint?'https://magiceden.io/item-details/'+encodeURIComponent(s.mint):'';const tag=href?'a':'div';const target=href?' target="_blank" rel="noopener noreferrer" href="'+escapeHtml(href)+'"':'';return '<'+tag+' class="sale"'+target+'><div><div class="saleName">'+escapeHtml(s.name||s.symbol)+'</div><div class="saleSub">'+escapeHtml(s.marketplace||'Magic Eden')+' · '+short(s.mint)+'</div></div><div><div class="salePrice">'+money(s.price)+' '+escapeHtml(s.priceCurrency||'')+'</div><div class="saleTime">'+timeAgo(s.time)+'</div></div></'+tag+'>'}).join(''):'<div class="empty">'+escapeHtml(latestSalesDiagnostics?.note||'No decoded sales returned for this window.')+'</div>';
 }
 async function loadMarket(){
+ if(marketRequest){marketRefreshQueued=true;return;}
+ marketRequest=true;
  $('collections').innerHTML='<div class="empty">Fetching real collections and recent sales…</div>';$('salesFeed').innerHTML='<div class="empty">Loading…</div>';
  try{
   const r=await fetch('/api/market/collections?minutes='+selectedMinutes);const data=await r.json();
@@ -65,6 +67,7 @@ async function loadMarket(){
   renderCollections();renderSales();
   const diag=data.salesDiagnostics||{};const diagText='Bitquery window '+selectedMinutes+'m: '+Number(diag.decodedSales||0)+' decoded trades; '+Number(diag.groupsResolvedToCollections||0)+' groups resolved to collection identity; '+Number(diag.groupsResolvedToMagicEden||0)+' mapped to Magic Eden collection pages; '+Number(diag.groupsNotMatchedToCollections||0)+' unresolved groups.';const samples=(diag.unresolvedSamples||[]).slice(0,3).map(x=>'Unmatched NFT ticker '+(x.nftSymbol||'unknown')+' ('+Number(x.salesCount||0)+' sale(s))').join('; ');const errs=Object.entries(data.providerErrors||{}).filter(x=>x[1]).map(x=>x[0]+': '+x[1]);const note=[diagText,diag.note,samples,...(data.limitations||[]),...(errs.length?['Provider issue — '+errs.join(' | ')]:[])].filter(Boolean).join(' ');$('allNotice').textContent=note;$('allNotice').classList.toggle('hidden',!note);
  }catch(e){$('collections').innerHTML='<div class="empty">Could not load marketplace data: '+escapeHtml(e.message)+'</div>';$('salesFeed').innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>';$('activeCount').textContent='—';$('salesCount').textContent='—';$('volumeSol').textContent='—'}
+ finally{marketRequest=false;if(marketRefreshQueued){marketRefreshQueued=false;loadMarket();}}
 }
 function setDetailTab(tab){
  currentDetailTab=tab;
