@@ -256,7 +256,7 @@ async function magicEdenGet(path, query = {}) {
     const wait = Math.max(0, 550 - (Date.now() - magicEdenLastRequestAt));
     if (wait) await new Promise(resolve => setTimeout(resolve, wait));
     magicEdenLastRequestAt = Date.now();
-    const url = new URL(path, MAGIC_EDEN_API_BASE);
+    const url = new URL(MAGIC_EDEN_API_BASE + path);
     for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== null && String(value).length) url.searchParams.set(key, String(value));
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
     const body = await response.json().catch(() => ({}));
