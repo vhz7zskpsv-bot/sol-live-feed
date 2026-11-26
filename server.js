@@ -347,8 +347,8 @@ async function lookupCollectionFromMint(mint) {
       const asset = await quicknodeRpc('getAsset', { id: mint, options: { showCollectionMetadata: true } });
       const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection'), cm = grouping?.collection_metadata || {};
       const das = grouping?.group_value ? { collectionAddress: grouping.group_value, name: cm.name || grouping.name || null,
-        collectionSymbol: cm.symbol || null, image: cm.image || null, verified: Boolean(grouping.verified), source: 'QuickNode Metaplex DAS' } : null;
-      if (das) result = { ...(result || {}), ...das, collectionSymbol: result?.collectionSymbol || das.collectionSymbol || null,
+        onChainSymbol: cm.symbol || null, image: cm.image || null, verified: Boolean(grouping.verified), source: 'QuickNode Metaplex DAS' } : null;
+      if (das) result = { ...(result || {}), ...das, collectionSymbol: result?.collectionSymbol || null, onChainSymbol: result?.onChainSymbol || das.onChainSymbol || null,
         name: result?.name || das.name || null, image: result?.image || das.image || null };
     } catch (error) { console.error('QuickNode DAS collection lookup failed:', error.status || 'network', error.message); }
   }
@@ -442,7 +442,7 @@ app.get('/api/market/collections', async (req, res) => {
       const marketSymbol = meta.collectionSymbol || null;
       if (!address && !marketSymbol) continue;
       const key = marketSymbol ? 'magiceden:' + String(marketSymbol).toLowerCase() : 'address:' + String(address).toLowerCase();
-      const symbol = marketSymbol || ('COLL-' + String(address).slice(0, 7));
+      const symbol = marketSymbol || meta.onChainSymbol || ('COLL-' + String(address).slice(0, 7));
       const name = meta.name || (marketSymbol ? marketSymbol.replace(/[_-]+/g, ' ') : null);
       if (!name) continue;
       const current = collectionsByKey.get(key) || { id:key, symbol, magicEdenSymbol:marketSymbol, name, image:meta.image || null,
