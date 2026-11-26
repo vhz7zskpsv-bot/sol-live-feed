@@ -342,7 +342,7 @@ async function lookupCollectionFromMint(mint) {
         source: 'Magic Eden public API' };
     } else if (fromToken.collectionAddress || fromToken.name || fromToken.image) result = { ...fromToken, source: 'Magic Eden public API' };
   } catch (error) { console.error('Magic Eden token collection lookup failed:', error.status || 'network', error.message); }
-  if (!result?.collectionAddress || !result?.name || !result?.image) {
+  if (!result?.collectionSymbol && (!result?.collectionAddress || !result?.name || !result?.image)) {
     try {
       const asset = await quicknodeRpc('getAsset', { id: mint, options: { showCollectionMetadata: true } });
       const grouping = (asset?.grouping || []).find(x => x.group_key === 'collection'), cm = grouping?.collection_metadata || {};
