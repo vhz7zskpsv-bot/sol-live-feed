@@ -460,7 +460,8 @@ function enqueueArbitrageListing(item, collection) {
   if (!mint || mint.length < 32 || mint.length > 48) return;
   const name = pickText(token.name, token.title, item.name, item.tokenName, item.title) || 'Solana NFT';
   const image = pickText(token.image, token.imageUrl, token.imageURI, item.image, item.imageUrl);
-  if (arbitrageScanner.opportunities.has(mint)) return;
+  const prior = arbitrageScanner.opportunities.get(mint);
+  if (prior && Date.now() - new Date(prior.checkedAt).getTime() < 5 * 60 * 1000) return;
   arbitrageScanner.queue.delete(mint);
   arbitrageScanner.queue.set(mint, { mint, name, image, symbol:collection?.symbol || '',
     collectionName:collection?.name || collection?.symbol || '', queuedAt:Date.now() });
@@ -1184,6 +1185,8 @@ app.get('/api/market/collections', async (req, res) => {
 
 app.get('/api/market/arbitrage', (req, res) => {
   ensureArbitrageScanner();
+  const freshCutoff=Date.now()-5*60*1000;
+  for (const [mint,item] of arbitrageScanner.opportunities) if (!item.checkedAt || new Date(item.checkedAt).getTime()<freshCutoff) arbitrageScanner.opportunities.delete(mint);
   const opportunities=[...arbitrageScanner.opportunities.values()]
     .sort((a,b)=>b.grossSpread-a.grossSpread).slice(0,100);
   res.json({success:true,source:'Magic Eden public Solana API',mode:'read-only',
