@@ -148,10 +148,12 @@ async function getRecentSolanaMints() {
   const tokenMetadataProgram = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
   const bubblegumProgram = 'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY';
   const coreProgram = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
+  const launchMyNftProgram = 'ArAA6CZC123yMJLUe4uisBEgvfuw2WEvex9iFmFCYiXv';
   const query = 'query { Solana { Instructions(limit: {count: 100}, orderBy: {descending: Block_Time}, where: {Transaction: {Result: {Success: true}}, any: [' +
     '{Instruction: {Program: {Address: {is: "' + tokenMetadataProgram + '"}, Method: {in: ["CreateMetadataAccount", "CreateMetadataAccountV2", "CreateMetadataAccountV3", "CreateV1"]}}}} ' +
     '{Instruction: {Program: {Address: {is: "' + bubblegumProgram + '"}, Method: {in: ["MintV1", "MintToCollectionV1", "MintV2"]}}}} ' +
-    '{Instruction: {Program: {Address: {is: "' + coreProgram + '"}, Method: {in: ["create", "createV1"]}}}}' +
+    '{Instruction: {Program: {Address: {is: "' + coreProgram + '"}, Method: {in: ["create", "createV1"]}}}} ' +
+    '{Instruction: {Program: {Address: {is: "' + launchMyNftProgram + '"}, Method: {in: ["MintV6"]}}}}' +
     ']}) { Block { Time } Transaction { Signature Signer } Instruction { Accounts { Address } Logs Program { Address Method AccountNames } } } } }';
   const payload = await bitqueryGraphql(query);
   if (payload.errors?.length) {
@@ -183,6 +185,10 @@ async function getRecentSolanaMints() {
     } else if (programAddress === tokenMetadataProgram) {
       const namedIndex = names.findIndex(x => x === 'mint');
       assetId = namedIndex >= 0 ? accounts[namedIndex] : accounts[1] || null;
+    } else if (programAddress === launchMyNftProgram) {
+      const namedIndex = names.findIndex(x => x === 'mint' || x === 'nft_mint');
+      assetId = namedIndex >= 0 ? accounts[namedIndex] : null;
+      standard = 'LaunchMyNFT';
     }
     if (!assetId || candidates.has(assetId)) continue;
     candidates.set(assetId, {
@@ -276,13 +282,14 @@ async function getRecentSolanaMintsFree() {
   const programs = [
     { id:'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s', standard:'NFT', kind:'metadata' },
     { id:'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d', standard:'MPL Core', kind:'core' },
-    { id:'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY', standard:'cNFT', kind:'bubblegum' }
+    { id:'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY', standard:'cNFT', kind:'bubblegum' },
+    { id:'ArAA6CZC123yMJLUe4uisBEgvfuw2WEvex9iFmFCYiXv', standard:'LaunchMyNFT', kind:'launchmynft' }
   ];
   const candidates = new Map();
   let signaturesScanned = 0, transactionsRead = 0;
   for (const program of programs) {
     try {
-      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:8, commitment:'finalized' }]);
+      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:5, commitment:'finalized' }]);
       signaturesScanned += Array.isArray(signatures) ? signatures.length : 0;
       for (const sig of (signatures || [])) {
         if (sig.err) continue;
@@ -294,20 +301,29 @@ async function getRecentSolanaMintsFree() {
           const instructions = [...(message.instructions || []), ...((tx?.meta?.innerInstructions || []).flatMap(x => x.instructions || []))];
           for (const ix of instructions) {
             const programId = ix.programId || keys[ix.programIdIndex] || '';
-            if (programId !== program.id) continue;
-            const accounts = (ix.accounts || []).map(a => typeof a === 'number' ? keys[a] : (typeof a === 'string' ? a : a?.pubkey)).filter(Boolean);
             const logs = (tx?.meta?.logMessages || []).join('\n');
-            let id = null;
-            if (program.kind === 'metadata') id = accounts[1] || null;
-            else if (program.kind === 'core') id = accounts[0] || null;
-            else {
-              const match = logs.match(/Leaf asset ID:\\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i);
-              id = match?.[1] || null;
+            const targetInstructions = program.kind === 'launchmynft'
+              ? instructions.filter(item => [
+                  'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',
+                  'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d',
+                  'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY'
+                ].includes(item.programId || keys[item.programIdIndex] || ''))
+              : instructions.filter(item => (item.programId || keys[item.programIdIndex] || '') === program.id);
+            for (const targetIx of targetInstructions) {
+              const targetProgramId = targetIx.programId || keys[targetIx.programIdIndex] || '';
+              const accounts = (targetIx.accounts || []).map(a => typeof a === 'number' ? keys[a] : (typeof a === 'string' ? a : a?.pubkey)).filter(Boolean);
+              let id = null, detectedStandard = program.standard;
+              if (targetProgramId === 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s') { id = accounts[1] || null; detectedStandard = 'NFT'; }
+              else if (targetProgramId === 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d') { id = accounts[0] || null; detectedStandard = 'MPL Core'; }
+              else if (targetProgramId === 'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY') {
+                const match = logs.match(/Leaf asset ID:\\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+                id = match?.[1] || null; detectedStandard = 'cNFT';
+              }
+              if (!id || candidates.has(id)) continue;
+              candidates.set(id, { id, standard:detectedStandard, method:targetIx.parsed?.type || targetIx.data || 'create', signature:sig.signature,
+                creator:tx?.transaction?.message?.accountKeys?.find(k => typeof k === 'object' && k.signer)?.pubkey || null,
+                createdAt:tx?.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null });
             }
-            if (!id || candidates.has(id)) continue;
-            candidates.set(id, { id, standard:program.standard, method:ix.parsed?.type || ix.data || 'create', signature:sig.signature,
-              creator:tx?.transaction?.message?.accountKeys?.find(k => typeof k === 'object' && k.signer)?.pubkey || null,
-              createdAt:tx?.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null });
           }
         } catch (error) {
           console.error('Solana public RPC transaction lookup failed:', error.status || 'network', error.message);
