@@ -1,5 +1,7 @@
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -561,13 +563,60 @@ async function getBitquerySalesSnapshot() {
 
 const magicEdenSalesCache = new Map();
 const magicEdenDirectorySnapshot = { at: 0, collections: null, pages: 0, pending: null };
+const SALES_STATE_FILE = process.env.SALES_STATE_FILE || '/tmp/nft-sales-scanner-state.json';
 const magicEdenScanner = {
   running: false, collections: [], index: 0, cycle: 0,
   salesById: new Map(), rawActivityRows: 0, recognizedSaleRows: 0,
   missingTimestampSales: 0, activityTypeCounts: {}, errors: [],
   directoryPages: 0, directoryCollectionsAvailable: 0,
-  cycleStartedAt: null, lastCycleCompletedAt: null, lastUpdatedAt: null
+  cycleStartedAt: null, lastCycleCompletedAt: null, lastUpdatedAt: null,
+  stateLoaded: false, savePending: false
 };
+
+function loadMagicEdenScannerState() {
+  if (magicEdenScanner.stateLoaded) return;
+  magicEdenScanner.stateLoaded = true;
+  try {
+    const saved = JSON.parse(fs.readFileSync(SALES_STATE_FILE, 'utf8'));
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const sales = Array.isArray(saved.sales) ? saved.sales.filter(x => x?.time && new Date(x.time).getTime() >= cutoff) : [];
+    magicEdenScanner.salesById = new Map(sales.map(sale => {
+      const identity = sale.signature ? sale.signature + '|' + (sale.mint || [sale.time, sale.price ?? '', sale.name].join('|')) :
+        [sale.collectionSymbol || '', sale.mint || '', sale.time, sale.price ?? '', sale.name].join('|');
+      return [identity, sale];
+    }));
+    magicEdenScanner.index = Number.isInteger(saved.index) ? Math.max(0, saved.index) : 0;
+    magicEdenScanner.cycle = Number(saved.cycle) || 0;
+    magicEdenScanner.lastUpdatedAt = saved.lastUpdatedAt || null;
+    magicEdenScanner.lastCycleCompletedAt = saved.lastCycleCompletedAt || null;
+    console.log('Restored NFT sales scanner state:', sales.length, 'recent sales; scan index', magicEdenScanner.index);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('Could not restore NFT scanner state:', error.message);
+  }
+}
+
+function saveMagicEdenScannerState() {
+  if (magicEdenScanner.savePending) return;
+  magicEdenScanner.savePending = true;
+  try {
+    const state = {
+      savedAt: new Date().toISOString(),
+      index: magicEdenScanner.index,
+      cycle: magicEdenScanner.cycle,
+      lastUpdatedAt: magicEdenScanner.lastUpdatedAt,
+      lastCycleCompletedAt: magicEdenScanner.lastCycleCompletedAt,
+      sales: [...magicEdenScanner.salesById.values()]
+    };
+    const temp = SALES_STATE_FILE + '.tmp';
+    fs.mkdirSync(path.dirname(SALES_STATE_FILE), { recursive: true });
+    fs.writeFileSync(temp, JSON.stringify(state));
+    fs.renameSync(temp, SALES_STATE_FILE);
+  } catch (error) {
+    console.warn('Could not persist NFT scanner state:', error.message);
+  } finally {
+    magicEdenScanner.savePending = false;
+  }
+}
 
 function normalizeMagicEdenActivityTime(rawTime) {
   if (typeof rawTime === 'number' && Number.isFinite(rawTime)) {
@@ -714,10 +763,12 @@ async function scanMagicEdenCollection(collection) {
     if (!sale.time || new Date(sale.time).getTime() < cutoff) magicEdenScanner.salesById.delete(id);
   }
   magicEdenScanner.lastUpdatedAt = new Date().toISOString();
+  saveMagicEdenScannerState();
 }
 
 async function runMagicEdenSalesScanner() {
   if (magicEdenScanner.running) return;
+  loadMagicEdenScannerState();
   magicEdenScanner.running = true;
   try {
     while (true) {
@@ -744,6 +795,7 @@ async function runMagicEdenSalesScanner() {
           magicEdenScanner.cycle++;
           magicEdenScanner.index = 0;
           magicEdenScanner.cycleStartedAt = new Date().toISOString();
+          saveMagicEdenScannerState();
           // Keep rolling diagnostic counters across cycles; sales themselves
           // are independently pruned to the requested 24-hour window.
           magicEdenScanner.errors = [];
@@ -752,6 +804,7 @@ async function runMagicEdenSalesScanner() {
         const collection = magicEdenScanner.collections[magicEdenScanner.index];
         await scanMagicEdenCollection(collection);
         magicEdenScanner.index++;
+        saveMagicEdenScannerState();
       } catch (error) {
         magicEdenScanner.errors.push('Scanner: ' + error.message);
         if (magicEdenScanner.errors.length > 40) magicEdenScanner.errors.shift();
@@ -774,6 +827,7 @@ function ensureMagicEdenSalesScanner() {
 }
 
 async function getMagicEdenSalesSnapshot() {
+  loadMagicEdenScannerState();
   ensureMagicEdenSalesScanner();
   const collections = magicEdenScanner.collections;
   const sales = [...magicEdenScanner.salesById.values()]
