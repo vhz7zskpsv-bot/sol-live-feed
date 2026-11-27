@@ -582,7 +582,7 @@ const SALES_STATE_FILE = process.env.SALES_STATE_FILE || '/tmp/nft-sales-scanner
 const magicEdenScanner = {
   running: false, collections: [], index: 0, cycle: 0,
   salesById: new Map(), rawActivityRows: 0, recognizedSaleRows: 0,
-  missingTimestampSales: 0, activityTypeCounts: {}, errors: [],
+  missingTimestampSales: 0, activityTypeCounts: {}, activitySamples: [], errors: [],
   directoryPages: 0, directoryCollectionsAvailable: 0,
   cycleStartedAt: null, lastCycleCompletedAt: null, lastUpdatedAt: null,
   stateLoaded: false, savePending: false,
@@ -730,9 +730,16 @@ async function refreshMagicEdenHotCollections() {
 function recordMagicEdenActivitySale(item, collection) {
   const originalType = String(item.type || item.activityType || item.activity_type || item.txType || '').trim();
   const normalizedType = originalType.toLowerCase().replace(/[^a-z]/g, '');
-  if (originalType) {
-    magicEdenScanner.activityTypeCounts[originalType] =
-      (magicEdenScanner.activityTypeCounts[originalType] || 0) + 1;
+  const typeLabel = originalType || '(missing)';
+  magicEdenScanner.activityTypeCounts[typeLabel] = (magicEdenScanner.activityTypeCounts[typeLabel] || 0) + 1;
+  if (magicEdenScanner.activitySamples.length < 8) {
+    const timeFields = ['blockTime','block_time','blocktime','time','createdAt','created_at','timestamp','ts'];
+    magicEdenScanner.activitySamples.push({
+      keys: Object.keys(item || {}).slice(0, 60),
+      type: originalType || null,
+      timeFields: Object.fromEntries(timeFields.filter(key => item?.[key] !== undefined).map(key => [key, item[key]])),
+      tokenKeys: Object.keys(item?.token || item?.nft || item?.item || item?.asset || {}).slice(0, 30)
+    });
   }
   const isSale = ['buynow','acceptbid','buy','sale','auctionbuy','sold','purchase','purchasesale'].includes(normalizedType);
   if (!isSale) return;
@@ -740,7 +747,7 @@ function recordMagicEdenActivitySale(item, collection) {
   magicEdenScanner.recognizedSaleRows++;
   const token = item.token || item.nft || item.item || item.asset || {};
   const rawTime = item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ??
-    item.createdAt ?? item.created_at ?? null;
+    item.createdAt ?? item.created_at ?? item.timestamp ?? item.ts ?? null;
   const time = normalizeMagicEdenActivityTime(rawTime);
   if (!time) {
     magicEdenScanner.missingTimestampSales++;
@@ -902,6 +909,7 @@ async function getMagicEdenSalesSnapshot() {
     sampledCollections: magicEdenScanner.index,
     rawActivityRows: magicEdenScanner.rawActivityRows,
     activityTypeCounts: { ...magicEdenScanner.activityTypeCounts },
+    activitySamples: magicEdenScanner.activitySamples.slice(0, 8),
     recognizedSaleRows: magicEdenScanner.recognizedSaleRows,
     missingTimestampSales: magicEdenScanner.missingTimestampSales,
     scanProgress: {
@@ -1035,7 +1043,7 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, directoryPages:salesData.sourceDiagnostics?.directoryPages || 0, directoryCollectionsAvailable:salesData.sourceDiagnostics?.directoryCollectionsAvailable || 0, scanProgress:salesData.sourceDiagnostics?.scanProgress || null, missingTimestampSales:salesData.sourceDiagnostics?.missingTimestampSales || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, directoryPages:salesData.sourceDiagnostics?.directoryPages || 0, directoryCollectionsAvailable:salesData.sourceDiagnostics?.directoryCollectionsAvailable || 0, scanProgress:salesData.sourceDiagnostics?.scanProgress || null, missingTimestampSales:salesData.sourceDiagnostics?.missingTimestampSales || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, activitySamples:salesData.sourceDiagnostics?.activitySamples || [], recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
       note:salesData.sales.length===0?(salesData.sourceDiagnostics?.rawActivityRows ? 'Activity records were returned, but no timestamped sales in the last 24 hours were decoded. Check activityTypeCounts and missingTimestampSales.' : 'The all-collection background scan is still running; results fill in as each collection is checked.'):(salesData.sourceDiagnostics?.scanProgress?.percent < 100 ? 'Background scan in progress: '+salesData.sourceDiagnostics.scanProgress.scanned+' of '+salesData.sourceDiagnostics.scanProgress.total+' Magic Eden collections checked. The list grows as the scan continues.' : 'All collections in the current Magic Eden directory have been checked. This source does not include sales on other marketplaces.') };
