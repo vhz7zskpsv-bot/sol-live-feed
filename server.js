@@ -233,6 +233,7 @@ async function getRecentSolanaMints() {
       sampleAssets: [], supply: null, supplySource: 'Not reported by asset indexer'
     };
     group.observedMints++;
+    group.mintedCount = group.observedMints;
     if (asset.createdAt && (!group.latestMintAt || new Date(asset.createdAt) > new Date(group.latestMintAt))) group.latestMintAt = asset.createdAt;
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
@@ -281,7 +282,7 @@ async function getRecentSolanaMintsFree() {
   let signaturesScanned = 0, transactionsRead = 0;
   for (const program of programs) {
     try {
-      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:8, commitment:'finalized' }]);
+      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:20, commitment:'finalized' }]);
       signaturesScanned += Array.isArray(signatures) ? signatures.length : 0;
       for (const sig of (signatures || [])) {
         if (sig.err) continue;
@@ -311,14 +312,14 @@ async function getRecentSolanaMintsFree() {
         } catch (error) {
           console.error('Solana public RPC transaction lookup failed:', error.status || 'network', error.message);
         }
-        await new Promise(resolve => setTimeout(resolve, 350));
+        await new Promise(resolve => setTimeout(resolve, 450));
       }
     } catch (error) {
       console.error('Solana public RPC signature scan failed for', program.standard, error.status || 'network', error.message);
     }
   }
   const assets = [];
-  const discovered = [...candidates.values()].slice(0, 12);
+  const discovered = [...candidates.values()].slice(0, 40);
   for (const candidate of discovered) {
     try {
       const asset = await quicknodeRpc('getAsset', { id:candidate.id, options:{ showCollectionMetadata:true } });
@@ -346,17 +347,17 @@ async function getRecentSolanaMintsFree() {
     const key = asset.collectionAddress || 'unverified:' + (asset.creators[0] || asset.id);
     const group = grouped.get(key) || { id:key, name:asset.collectionName || 'Unverified / ungrouped mints',
       image:asset.collectionImage || asset.image, collectionAddress:asset.collectionAddress, verified:asset.verified,
-      observedMints:0, latestMintAt:asset.createdAt, sampleAssets:[], supply:null, supplySource:'Not reported by asset indexer' };
+      observedMints:0, mintedCount:0, latestMintAt:asset.createdAt, sampleAssets:[], supply:null, supplySource:'Maximum collection supply is not published in DAS asset metadata' };
     group.observedMints++;
     if (asset.createdAt && (!group.latestMintAt || new Date(asset.createdAt) > new Date(group.latestMintAt))) group.latestMintAt = asset.createdAt;
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
   }
-  const data = { configured:true, scannedAt:new Date().toISOString(), assets, collections:[...grouped.values()].sort((a,b)=>new Date(b.latestMintAt||0)-new Date(a.latestMintAt||0)),
+  const data = { configured:true, scannedAt:new Date().toISOString(), assets, collections:[...grouped.values()].filter(group => group.observedMints >= 15).sort((a,b)=>new Date(b.latestMintAt||0)-new Date(a.latestMintAt||0)),
     diagnostics:{ source:'Solana public RPC + QuickNode DAS', signaturesScanned, transactionsRead, uniqueAssetCandidates:candidates.size,
       hydratedAssets:assets.length, standards:['standard Token Metadata NFTs','MPL Core','compressed NFTs only when the transaction log exposes Leaf asset ID'],
       note:'Free public RPC is rate-limited. Bubblegum cNFT asset IDs are not guaranteed to be present in logs, so cNFT coverage is incomplete.' },
-    note:'Free-source mint scan: newest transactions from supported NFT programs are sampled, then asset metadata is hydrated through your existing QuickNode DAS endpoint. This is not a complete global mint index.' };
+    note:'Only collections with at least 15 successfully detected mints are displayed. Counts are observed in the current scan, not guaranteed total collection supply. Maximum supply is shown only when on-chain metadata publishes it; otherwise it is not disclosed.' };
   launchCache.at = Date.now(); launchCache.data = data; return data;
 }
 
