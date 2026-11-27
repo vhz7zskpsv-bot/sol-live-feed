@@ -663,7 +663,7 @@ function recordMagicEdenActivitySale(item, collection) {
     priceCurrencyMint: item.currencyMint || item.paymentMint || null,
     marketplace: 'Magic Eden'
   };
-  const identity = signature || [symbol, mint || '', time, sale.price ?? '', sale.name].join('|');
+  const identity = signature ? signature + '|' + (mint || [time, sale.price ?? '', sale.name].join('|')) : [symbol, mint || '', time, sale.price ?? '', sale.name].join('|');
   magicEdenScanner.salesById.set(identity, sale);
 }
 
@@ -1025,6 +1025,6 @@ async function loadData(path,label){
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`NFT Aggregator server running on 0.0.0.0:${PORT}`);
-  console.log('Sales feed: Magic Eden public API (popular collections + collection activities).');
+  console.log('Sales feed: continuous scan of the full Magic Eden public collection directory and recent collection activities.');
   console.log('Mint discovery: Solana public RPC. Asset metadata hydration: existing QuickNode Metaplex DAS endpoint.');
 });
