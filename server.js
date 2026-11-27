@@ -404,7 +404,7 @@ function findListingRows(value, depth = 0) {
     const rows = value.filter(x => x && typeof x === 'object' && !Array.isArray(x));
     const score = rows.reduce((n, x) => {
       const k = Object.keys(x).join(' ').toLowerCase();
-      return n + (/mint|token|price|listing|seller|pda|escrow|rarity|image|name/.test(k) || x.token || x.nft || x.asset ? 1 : 0);
+      return n + (/mint|token|price|listing|seller|pda|escrow|rarity|image|name|bidamount|offer|buyer|expiry|auctionhouse/.test(k) || x.token || x.nft || x.asset ? 1 : 0);
     }, 0);
     if (rows.length && score > 0) return rows;
     for (const item of value) { const found = findListingRows(item, depth + 1); if (found.length) return found; }
