@@ -560,97 +560,223 @@ async function getBitquerySalesSnapshot() {
 
 
 const magicEdenSalesCache = new Map();
-async function getMagicEdenSalesSnapshot(minutes) {
-  // Use the daily popularity leaderboard as a broad discovery list even for
-  // short display windows. Actual sale timestamps are filtered downstream.
-  const cacheKey = '1d';
-  const cached = magicEdenSalesCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < 60000) return cached.data;
-  let popularRows = [];
-  let discoverySource = 'Magic Eden popular collections';
-  let directoryPages = 0;
-  try {
-    const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: cacheKey });
-    popularRows = Array.isArray(popularRaw) ? popularRaw :
-      (popularRaw?.collections || popularRaw?.results || popularRaw?.data || popularRaw?.items || []);
-  } catch (error) {
-    console.warn('Magic Eden popular collections unavailable; falling back to collection directory:', error.status || 'network', error.message);
+const magicEdenDirectorySnapshot = { at: 0, collections: null, pages: 0, pending: null };
+const magicEdenScanner = {
+  running: false, collections: [], index: 0, cycle: 0,
+  salesById: new Map(), rawActivityRows: 0, recognizedSaleRows: 0,
+  missingTimestampSales: 0, activityTypeCounts: {}, errors: [],
+  directoryPages: 0, directoryCollectionsAvailable: 0,
+  cycleStartedAt: null, lastCycleCompletedAt: null, lastUpdatedAt: null
+};
+
+function normalizeMagicEdenActivityTime(rawTime) {
+  if (typeof rawTime === 'number' && Number.isFinite(rawTime)) {
+    return new Date(rawTime < 1000000000000 ? rawTime * 1000 : rawTime).toISOString();
   }
-  // The popular leaderboard can return an empty payload. Page through the
-  // documented public directory so the fallback is not limited to its first 500 entries.
-  if (!popularRows.length) {
-    discoverySource = 'Magic Eden public collections directory (2-page fallback)';
-    for (const offset of [0, 500]) {
-      const directory = await magicEdenGet('/collections', { offset, limit: 500 });
-      const pageRows = Array.isArray(directory) ? directory :
-        (directory?.collections || directory?.results || directory?.data || directory?.items || []);
-      directoryPages++;
-      popularRows.push(...pageRows);
-      if (pageRows.length < 500) break;
-    }
+  if (typeof rawTime === 'string') {
+    if (/^\d{10}$/.test(rawTime)) return new Date(Number(rawTime) * 1000).toISOString();
+    const parsed = Date.parse(rawTime);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
   }
-  const collections = popularRows
-    .filter(x => x && (x.symbol || x.collectionSymbol))
-    .sort((a, b) => Number(b.volumeAll || b.volume24hr || b.volume_24hr || b.volume_24hr_sol || 0) -
-                    Number(a.volumeAll || a.volume24hr || a.volume_24hr || a.volume_24hr_sol || 0))
-    .slice(0, 30);
-  const sales = [];
-  const errors = [];
-  const activityTypeCounts = {};
-  let rawActivityRows = 0;
-  for (const collection of collections) {
-    const symbol = String(collection.symbol || collection.collectionSymbol);
-    try {
-      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
-      const rows = findListingRows(raw);
-      rawActivityRows += rows.length;
-      for (const item of rows) {
-        const originalType = String(item.type || item.activityType || item.activity_type || item.txType || '').trim();
-        const normalizedType = originalType.toLowerCase().replace(/[^a-z]/g, '');
-        if (originalType) activityTypeCounts[originalType] = (activityTypeCounts[originalType] || 0) + 1;
-        const isSale = ['buynow','acceptbid','buy','sale','auctionbuy','sold','purchase','purchasesale'].includes(normalizedType);
-        if (!isSale) continue;
-        const token = item.token || item.nft || item.item || item.asset || {};
-        const rawTime = item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ?? item.createdAt ?? item.created_at ?? null;
-        let time = rawTime;
-        if (typeof rawTime === 'number' && rawTime < 1000000000000) time = new Date(rawTime * 1000).toISOString();
-        else if (typeof rawTime === 'string' && /^\\d{10}$/.test(rawTime)) time = new Date(Number(rawTime) * 1000).toISOString();
-        else if (rawTime && !Number.isNaN(Date.parse(rawTime))) time = new Date(rawTime).toISOString();
-        const rawPrice = item.priceSol ?? item.price_sol ?? item.price ?? item.amount ?? item.paymentAmount ?? null;
-        const price = typeof rawPrice === 'object' && rawPrice ? (rawPrice.sol ?? rawPrice.amount ?? null) : rawPrice;
-        const mint = item.tokenMint || item.token_mint || item.mint || item.mintAddress ||
-          token.tokenMint || token.mint || token.mintAddress || token.id || null;
-        const collectionMeta = {
-          collectionSymbol: symbol,
-          name: collection.name || collection.title || symbol,
-          image: collection.image || collection.imageUrl || collection.imageURL || null,
-          collectionAddress: collection.collectionAddress || collection.collection_address || null,
-          floorPrice: collection.floorPrice ?? collection.floor_price ?? null,
-          listedCount: collection.listedCount ?? collection.listed_count ?? null,
-          verified: Boolean(collection.isVerified || collection.verified)
-        };
-        sales.push({
-          time, signature: item.signature || item.txSignature || item.tx_signature || item.transaction_id || null,
-          symbol: token.symbol || collection.symbol || symbol,
-          name: token.name || token.title || item.name || item.tokenName || collection.name || symbol,
-          mint, collectionAddress: collectionMeta.collectionAddress, collectionSymbol: symbol,
-          collectionMeta, nftAmount: 1, price: price === null ? null : Number(price),
-          priceCurrency: item.currency || item.paymentSymbol || item.priceCurrency || 'SOL',
-          priceCurrencyMint: item.currencyMint || item.paymentMint || null,
-          marketplace: 'Magic Eden'
-        });
+  return null;
+}
+
+async function getAllMagicEdenCollections() {
+  if (magicEdenDirectorySnapshot.collections &&
+      Date.now() - magicEdenDirectorySnapshot.at < 6 * 60 * 60 * 1000) {
+    return magicEdenDirectorySnapshot;
+  }
+  if (magicEdenDirectorySnapshot.pending) return magicEdenDirectorySnapshot.pending;
+
+  magicEdenDirectorySnapshot.pending = (async () => {
+    const bySymbol = new Map();
+    let pages = 0;
+    for (let offset = 0; offset < 10000; offset += 500) {
+      const raw = await magicEdenGet('/collections', { offset, limit: 500 });
+      const rows = Array.isArray(raw) ? raw :
+        (raw?.collections || raw?.results || raw?.data || raw?.items || []);
+      pages++;
+      for (const row of rows) {
+        const symbol = String(row?.symbol || row?.collectionSymbol || '').trim();
+        if (symbol && !bySymbol.has(symbol.toLowerCase())) bySymbol.set(symbol.toLowerCase(), normalizeCollection(row));
       }
-    } catch (error) {
-      errors.push(symbol + ': ' + error.message);
-      console.error('Magic Eden activity lookup failed for', symbol, error.status || 'network', error.message);
+      if (rows.length < 500) break;
     }
+    const result = { at: Date.now(), collections: [...bySymbol.values()], pages, pending: null };
+    magicEdenDirectorySnapshot.at = result.at;
+    magicEdenDirectorySnapshot.collections = result.collections;
+    magicEdenDirectorySnapshot.pages = result.pages;
+    magicEdenDirectorySnapshot.pending = null;
+    return result;
+  })().catch(error => {
+    magicEdenDirectorySnapshot.pending = null;
+    throw error;
+  });
+  return magicEdenDirectorySnapshot.pending;
+}
+
+function recordMagicEdenActivitySale(item, collection) {
+  const originalType = String(item.type || item.activityType || item.activity_type || item.txType || '').trim();
+  const normalizedType = originalType.toLowerCase().replace(/[^a-z]/g, '');
+  if (originalType) {
+    magicEdenScanner.activityTypeCounts[originalType] =
+      (magicEdenScanner.activityTypeCounts[originalType] || 0) + 1;
   }
-  const data = { sales, collections, errors, discoverySource, directoryPages,
-    directoryCollectionsAvailable: popularRows.filter(x => x && (x.symbol || x.collectionSymbol)).length,
-    timeRange: cacheKey, sampledCollections: collections.length,
-    rawActivityRows, activityTypeCounts, recognizedSaleRows: sales.length };
-  magicEdenSalesCache.set(cacheKey, { at: Date.now(), data });
-  return data;
+  const isSale = ['buynow','acceptbid','buy','sale','auctionbuy','sold','purchase','purchasesale'].includes(normalizedType);
+  if (!isSale) return;
+
+  magicEdenScanner.recognizedSaleRows++;
+  const token = item.token || item.nft || item.item || item.asset || {};
+  const rawTime = item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ??
+    item.createdAt ?? item.created_at ?? null;
+  const time = normalizeMagicEdenActivityTime(rawTime);
+  if (!time) {
+    magicEdenScanner.missingTimestampSales++;
+    return;
+  }
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  if (new Date(time).getTime() < cutoff) return;
+
+  const rawPrice = item.priceSol ?? item.price_sol ?? item.price ?? item.amount ?? item.paymentAmount ?? null;
+  const price = typeof rawPrice === 'object' && rawPrice ? (rawPrice.sol ?? rawPrice.amount ?? null) : rawPrice;
+  const mint = item.tokenMint || item.token_mint || item.mint || item.mintAddress ||
+    token.tokenMint || token.mint || token.mintAddress || token.id || null;
+  const symbol = String(collection.symbol || '');
+  const collectionMeta = {
+    collectionSymbol: symbol,
+    name: collection.name || symbol,
+    image: collection.image || null,
+    collectionAddress: collection.collectionAddress || null,
+    floorPrice: collection.floorPrice ?? null,
+    listedCount: collection.listedCount ?? null,
+    verified: Boolean(collection.verified)
+  };
+  const signature = item.signature || item.txSignature || item.tx_signature || item.transaction_id || null;
+  const sale = {
+    time, signature,
+    symbol: token.symbol || symbol,
+    name: token.name || token.title || item.name || item.tokenName || collection.name || symbol,
+    mint, collectionAddress: collectionMeta.collectionAddress, collectionSymbol: symbol,
+    collectionMeta, nftAmount: 1,
+    price: price === null ? null : Number(price),
+    priceCurrency: item.currency || item.paymentSymbol || item.priceCurrency || 'SOL',
+    priceCurrencyMint: item.currencyMint || item.paymentMint || null,
+    marketplace: 'Magic Eden'
+  };
+  const identity = signature || [symbol, mint || '', time, sale.price ?? '', sale.name].join('|');
+  magicEdenScanner.salesById.set(identity, sale);
+}
+
+async function scanMagicEdenCollection(collection) {
+  const symbol = String(collection.symbol || '').trim();
+  if (!symbol) return;
+  try {
+    // Keep the compatible 100-row page size. Larger single-page limits have
+    // returned HTTP 400 on this endpoint, so do not raise the limit.
+    const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
+    const rows = findListingRows(raw);
+    magicEdenScanner.rawActivityRows += rows.length;
+    for (const item of rows) recordMagicEdenActivitySale(item, collection);
+  } catch (error) {
+    magicEdenScanner.errors.push(symbol + ': ' + error.message);
+    if (magicEdenScanner.errors.length > 40) magicEdenScanner.errors.shift();
+    console.error('Magic Eden activity lookup failed for', symbol, error.status || 'network', error.message);
+  }
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, sale] of magicEdenScanner.salesById) {
+    if (!sale.time || new Date(sale.time).getTime() < cutoff) magicEdenScanner.salesById.delete(id);
+  }
+  magicEdenScanner.lastUpdatedAt = new Date().toISOString();
+}
+
+async function runMagicEdenSalesScanner() {
+  if (magicEdenScanner.running) return;
+  magicEdenScanner.running = true;
+  try {
+    while (true) {
+      try {
+        const directory = await getAllMagicEdenCollections();
+        magicEdenScanner.collections = directory.collections;
+        magicEdenScanner.directoryPages = directory.pages;
+        magicEdenScanner.directoryCollectionsAvailable = directory.collections.length;
+
+        if (!magicEdenScanner.cycleStartedAt) {
+          magicEdenScanner.cycleStartedAt = new Date().toISOString();
+          magicEdenScanner.rawActivityRows = 0;
+          magicEdenScanner.recognizedSaleRows = 0;
+          magicEdenScanner.missingTimestampSales = 0;
+          magicEdenScanner.activityTypeCounts = {};
+          magicEdenScanner.errors = [];
+        }
+
+        if (!magicEdenScanner.collections.length) {
+          await new Promise(resolve => setTimeout(resolve, 30000));
+          continue;
+        }
+
+        if (magicEdenScanner.index >= magicEdenScanner.collections.length) {
+          magicEdenScanner.lastCycleCompletedAt = new Date().toISOString();
+          magicEdenScanner.cycle++;
+          magicEdenScanner.index = 0;
+          magicEdenScanner.cycleStartedAt = new Date().toISOString();
+          magicEdenScanner.rawActivityRows = 0;
+          magicEdenScanner.recognizedSaleRows = 0;
+          magicEdenScanner.missingTimestampSales = 0;
+          magicEdenScanner.activityTypeCounts = {};
+          magicEdenScanner.errors = [];
+        }
+
+        const collection = magicEdenScanner.collections[magicEdenScanner.index];
+        await scanMagicEdenCollection(collection);
+        magicEdenScanner.index++;
+      } catch (error) {
+        magicEdenScanner.errors.push('Scanner: ' + error.message);
+        if (magicEdenScanner.errors.length > 40) magicEdenScanner.errors.shift();
+        console.error('Magic Eden all-collection scanner error:', error.status || 'network', error.message);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
+    }
+  } finally {
+    magicEdenScanner.running = false;
+  }
+}
+
+function ensureMagicEdenSalesScanner() {
+  if (!magicEdenScanner.running) {
+    runMagicEdenSalesScanner().catch(error => {
+      magicEdenScanner.running = false;
+      console.error('Magic Eden sales scanner stopped:', error.message);
+    });
+  }
+}
+
+async function getMagicEdenSalesSnapshot() {
+  ensureMagicEdenSalesScanner();
+  const collections = magicEdenScanner.collections;
+  const sales = [...magicEdenScanner.salesById.values()]
+    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  return {
+    sales, collections, errors: [...magicEdenScanner.errors],
+    discoverySource: 'Full Magic Eden public collection directory, scanned continuously in the background',
+    directoryPages: magicEdenScanner.directoryPages,
+    directoryCollectionsAvailable: magicEdenScanner.directoryCollectionsAvailable,
+    timeRange: '1d',
+    sampledCollections: magicEdenScanner.index,
+    rawActivityRows: magicEdenScanner.rawActivityRows,
+    activityTypeCounts: { ...magicEdenScanner.activityTypeCounts },
+    recognizedSaleRows: magicEdenScanner.recognizedSaleRows,
+    missingTimestampSales: magicEdenScanner.missingTimestampSales,
+    scanProgress: {
+      running: magicEdenScanner.running,
+      cycle: magicEdenScanner.cycle + 1,
+      scanned: magicEdenScanner.index,
+      total: magicEdenScanner.directoryCollectionsAvailable,
+      percent: magicEdenScanner.directoryCollectionsAvailable
+        ? Math.round(magicEdenScanner.index / magicEdenScanner.directoryCollectionsAvailable * 100) : 0,
+      lastUpdatedAt: magicEdenScanner.lastUpdatedAt,
+      lastCycleCompletedAt: magicEdenScanner.lastCycleCompletedAt
+    }
+  };
 }
 
 async function getGlobalNftSales(minutes) {
@@ -690,7 +816,7 @@ async function getGlobalNftSales(minutes) {
       lookupCollectionFromMint(g.sampleMint).catch(() => null);
     }
 
-    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, directoryPages:snapshotData.directoryPages || 0, directoryCollectionsAvailable:snapshotData.directoryCollectionsAvailable || 0, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, rawActivityRows:snapshotData.rawActivityRows || 0, activityTypeCounts:snapshotData.activityTypeCounts || {}, recognizedSaleRows:snapshotData.recognizedSaleRows || 0, errors:snapshotData.errors || [] } };
+    const data = { sales, groups: [...groups.values()].sort((a,b) => b.salesCount-a.salesCount || b.volumeSol-a.volumeSol), sourceDiagnostics:{ source:'Magic Eden public API', sampledCollections:snapshotData.sampledCollections, directoryPages:snapshotData.directoryPages || 0, directoryCollectionsAvailable:snapshotData.directoryCollectionsAvailable || 0, discoverySource:snapshotData.discoverySource, timeRange:snapshotData.timeRange, rawActivityRows:snapshotData.rawActivityRows || 0, activityTypeCounts:snapshotData.activityTypeCounts || {}, recognizedSaleRows:snapshotData.recognizedSaleRows || 0, missingTimestampSales:snapshotData.missingTimestampSales || 0, scanProgress:snapshotData.scanProgress || null, errors:snapshotData.errors || [] } };
     salesCache.set(minutes, { at: Date.now(), data });
     return data;
   })();
@@ -771,10 +897,10 @@ app.get('/api/market/collections', async (req, res) => {
     const magicEdenGroups = salesData.groups.filter(g => Boolean(g.collectionMeta?.collectionSymbol)).length;
     const unresolvedGroups = salesData.groups.filter(g => !(g.collectionMeta?.collectionAddress || g.collectionAddress || g.collectionMeta?.collectionSymbol))
       .slice(0,8).map(g => ({ nftSymbol:g.symbol, sampleMint:g.sampleMint, salesCount:g.salesCount }));
-    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, directoryPages:salesData.sourceDiagnostics?.directoryPages || 0, directoryCollectionsAvailable:salesData.sourceDiagnostics?.directoryCollectionsAvailable || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
+    const salesDiagnostics = { requestedWindowMinutes:minutes, source:'Magic Eden public API', sampledCollections:salesData.sourceDiagnostics?.sampledCollections || 0, directoryPages:salesData.sourceDiagnostics?.directoryPages || 0, directoryCollectionsAvailable:salesData.sourceDiagnostics?.directoryCollectionsAvailable || 0, scanProgress:salesData.sourceDiagnostics?.scanProgress || null, missingTimestampSales:salesData.sourceDiagnostics?.missingTimestampSales || 0, sourceTimeRange:salesData.sourceDiagnostics?.timeRange || null, discoverySource:salesData.sourceDiagnostics?.discoverySource || null, sourceErrors:salesData.sourceDiagnostics?.errors || [], rawActivityRows:salesData.sourceDiagnostics?.rawActivityRows || 0, activityTypeCounts:salesData.sourceDiagnostics?.activityTypeCounts || {}, recognizedSaleRows:salesData.sourceDiagnostics?.recognizedSaleRows || 0, decodedSales:salesData.sales.length,
       groupedSaleIdentities:salesData.groups.length, groupsResolvedToCollections:resolvedGroups, groupsResolvedToMagicEden:magicEdenGroups,
       groupsNotMatchedToCollections:Math.max(0,salesData.groups.length-resolvedGroups), unresolvedSamples:unresolvedGroups,
-      note:salesData.sales.length===0?(salesData.sourceDiagnostics?.rawActivityRows ? 'Activity records were returned, but no recognized sale event types were found. Check activityTypeCounts.' : 'No activity records were returned for the sampled popular collections.'):null };
+      note:salesData.sales.length===0?(salesData.sourceDiagnostics?.rawActivityRows ? 'Activity records were returned, but no timestamped sales in the last 24 hours were decoded. Check activityTypeCounts and missingTimestampSales.' : 'The all-collection background scan is still running; results fill in as each collection is checked.'):(salesData.sourceDiagnostics?.scanProgress?.percent < 100 ? 'Background scan in progress: '+salesData.sourceDiagnostics.scanProgress.scanned+' of '+salesData.sourceDiagnostics.scanProgress.total+' Magic Eden collections checked. The list grows as the scan continues.' : 'All collections in the current Magic Eden directory have been checked. This source does not include sales on other marketplaces.') };
     res.json({ success:true, minutes, collections, activeCollections:collections.length, directoryCount:collections.length,
       directoryPages:1, directoryHasMore:false, sales:salesData.sales, salesDiagnostics, providerErrors:{},
       sources:{ sales:'Magic Eden public Solana API (popular collections + per-collection activities)', collectionMetadata:'Magic Eden public Solana API + optional QuickNode Metaplex DAS' },
@@ -782,7 +908,7 @@ app.get('/api/market/collections', async (req, res) => {
         'Collection cards are grouped by Magic Eden collection symbol or on-chain collection address, never by an individual NFT name.',
         'Magic Eden public read endpoints are rate-limited; collection metadata is cached.',
         'Unresolved assets remain in recent sales and diagnostics but are not shown as collections.',
-        'Free-source coverage is limited to the popular collections returned by Magic Eden; it is not a complete global M2 + MMM trade index.'
+        'Magic Eden collections are scanned continuously from its public directory; the first full pass takes time and each collection activity page is limited to 100 rows. This is not a complete all-marketplace Solana sales index and does not include Tensor-only or other marketplace sales.'
       ] });
   } catch (error) {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
