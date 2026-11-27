@@ -282,7 +282,7 @@ async function getRecentSolanaMintsFree() {
   let signaturesScanned = 0, transactionsRead = 0;
   for (const program of programs) {
     try {
-      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:20, commitment:'finalized' }]);
+      const signatures = await solanaPublicRpc('getSignaturesForAddress', [program.id, { limit:8, commitment:'finalized' }]);
       signaturesScanned += Array.isArray(signatures) ? signatures.length : 0;
       for (const sig of (signatures || [])) {
         if (sig.err) continue;
@@ -312,7 +312,7 @@ async function getRecentSolanaMintsFree() {
         } catch (error) {
           console.error('Solana public RPC transaction lookup failed:', error.status || 'network', error.message);
         }
-        await new Promise(resolve => setTimeout(resolve, 450));
+        await new Promise(resolve => setTimeout(resolve, 350));
       }
     } catch (error) {
       console.error('Solana public RPC signature scan failed for', program.standard, error.status || 'network', error.message);
