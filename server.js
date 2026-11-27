@@ -591,6 +591,25 @@ async function getAllMagicEdenCollections() {
   magicEdenDirectorySnapshot.pending = (async () => {
     const bySymbol = new Map();
     let pages = 0;
+
+    // Prioritize collections with recent marketplace activity so the first
+    // results appear quickly, then append the complete public directory.
+    try {
+      const popularRaw = await magicEdenGet('/marketplace/popular_collections', { timeRange: '1d' });
+      const popularRows = Array.isArray(popularRaw) ? popularRaw :
+        (popularRaw?.collections || popularRaw?.results || popularRaw?.data || popularRaw?.items || []);
+      popularRows
+        .filter(row => row && (row.symbol || row.collectionSymbol))
+        .sort((a, b) => Number(b.volumeAll || b.volume24hr || b.volume_24hr || b.volume_24hr_sol || 0) -
+                        Number(a.volumeAll || a.volume24hr || a.volume_24hr || a.volume_24hr_sol || 0))
+        .forEach(row => {
+          const symbol = String(row.symbol || row.collectionSymbol).trim();
+          if (symbol && !bySymbol.has(symbol.toLowerCase())) bySymbol.set(symbol.toLowerCase(), normalizeCollection(row));
+        });
+    } catch (error) {
+      console.warn('Magic Eden popular collections lookup failed; continuing with full directory:', error.status || 'network', error.message);
+    }
+
     for (let offset = 0; offset < 10000; offset += 500) {
       const raw = await magicEdenGet('/collections', { offset, limit: 500 });
       const rows = Array.isArray(raw) ? raw :
@@ -710,10 +729,8 @@ async function runMagicEdenSalesScanner() {
 
         if (!magicEdenScanner.cycleStartedAt) {
           magicEdenScanner.cycleStartedAt = new Date().toISOString();
-          magicEdenScanner.rawActivityRows = 0;
-          magicEdenScanner.recognizedSaleRows = 0;
-          magicEdenScanner.missingTimestampSales = 0;
-          magicEdenScanner.activityTypeCounts = {};
+          // Keep rolling diagnostic counters across cycles; sales themselves
+          // are independently pruned to the requested 24-hour window.
           magicEdenScanner.errors = [];
         }
 
@@ -727,10 +744,8 @@ async function runMagicEdenSalesScanner() {
           magicEdenScanner.cycle++;
           magicEdenScanner.index = 0;
           magicEdenScanner.cycleStartedAt = new Date().toISOString();
-          magicEdenScanner.rawActivityRows = 0;
-          magicEdenScanner.recognizedSaleRows = 0;
-          magicEdenScanner.missingTimestampSales = 0;
-          magicEdenScanner.activityTypeCounts = {};
+          // Keep rolling diagnostic counters across cycles; sales themselves
+          // are independently pruned to the requested 24-hour window.
           magicEdenScanner.errors = [];
         }
 
