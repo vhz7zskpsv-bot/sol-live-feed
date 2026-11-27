@@ -672,11 +672,19 @@ async function scanMagicEdenCollection(collection) {
   if (!symbol) return;
   try {
     // Keep the compatible 100-row page size. Larger single-page limits have
-    // returned HTTP 400 on this endpoint, so do not raise the limit.
-    const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
-    const rows = findListingRows(raw);
-    magicEdenScanner.rawActivityRows += rows.length;
-    for (const item of rows) recordMagicEdenActivitySale(item, collection);
+    // returned HTTP 400, so page with offsets instead when a collection is busy.
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (let offset = 0; offset < 1000; offset += 100) {
+      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset, limit: 100 });
+      const rows = findListingRows(raw);
+      magicEdenScanner.rawActivityRows += rows.length;
+      for (const item of rows) recordMagicEdenActivitySale(item, collection);
+      if (rows.length < 100) break;
+      const pageTimes = rows.map(item => normalizeMagicEdenActivityTime(
+        item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ?? item.createdAt ?? item.created_at ?? null
+      )).filter(Boolean).map(value => new Date(value).getTime());
+      if (pageTimes.length && Math.min(...pageTimes) < cutoff) break;
+    }
   } catch (error) {
     magicEdenScanner.errors.push(symbol + ': ' + error.message);
     if (magicEdenScanner.errors.length > 40) magicEdenScanner.errors.shift();
