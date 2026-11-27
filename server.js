@@ -446,6 +446,126 @@ async function magicEdenGet(path, query = {}) {
   magicEdenQueue = pending.then(() => undefined, () => undefined);
   return pending;
 }
+
+const arbitrageScanner = {
+  queue: new Map(), opportunities: new Map(), running: false, scanned: 0,
+  checked: 0, errors: 0, lastScanAt: null, lastError: null, dropped: 0
+};
+function enqueueArbitrageListing(item, collection) {
+  const type = String(item?.type || item?.activityType || item?.activity_type || item?.txType || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!['list','listing','listitem','listnft','listnow','listtoken'].includes(type)) return;
+  const token = item.token || item.nft || item.item || item.asset || {};
+  const mint = pickText(item.tokenMint, item.token_mint, item.mint, item.mintAddress,
+    token.tokenMint, token.mint, token.mintAddress, token.id);
+  if (!mint || mint.length < 32 || mint.length > 48) return;
+  const name = pickText(token.name, token.title, item.name, item.tokenName, item.title) || 'Solana NFT';
+  const image = pickText(token.image, token.imageUrl, token.imageURI, item.image, item.imageUrl);
+  if (arbitrageScanner.opportunities.has(mint)) return;
+  arbitrageScanner.queue.delete(mint);
+  arbitrageScanner.queue.set(mint, { mint, name, image, symbol:collection?.symbol || '',
+    collectionName:collection?.name || collection?.symbol || '', queuedAt:Date.now() });
+  while (arbitrageScanner.queue.size > 300) {
+    arbitrageScanner.queue.delete(arbitrageScanner.queue.keys().next().value);
+    arbitrageScanner.dropped++;
+  }
+}
+function rowsFromMagicEden(value) {
+  return findListingRows(value);
+}
+function marketPriceSol(row, kind) {
+  if (!row || typeof row !== 'object') return null;
+  const currency = pickText(row.currency, row.paymentSymbol, row.priceCurrency, row.tokenSymbol,
+    row.paymentToken?.symbol, row.currency?.symbol);
+  if (currency && !['SOL','WSOL'].includes(currency.toUpperCase())) return null;
+  const fields = kind === 'offer'
+    ? ['bidAmount','priceSol','price_sol','price','amount','offerPrice','value']
+    : ['price','listPrice','priceSol','price_sol','amount','salePrice'];
+  let raw = null;
+  for (const field of fields) {
+    if (row[field] !== undefined && row[field] !== null) { raw = row[field]; break; }
+  }
+  if (raw && typeof raw === 'object') raw = raw.sol ?? raw.amount ?? raw.value ?? raw.price ?? null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function timestampMillis(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'number' || /^\d+$/.test(String(value))) {
+    const n = Number(value);
+    return n < 1000000000000 ? n * 1000 : n;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function offerIsEligible(offer, mint) {
+  const status = String(offer.status || offer.state || offer.orderStatus || '').toLowerCase();
+  if (status && !['active','open','valid','live','listed'].includes(status)) return false;
+  const expires = timestampMillis(offer.expiry ?? offer.expiresAt ?? offer.expires_at ??
+    offer.expiration ?? offer.expirationTime ?? offer.endTime ?? offer.end_time);
+  if (expires !== null && expires > 0 && expires <= Date.now()) return false;
+  const offerMint = pickText(offer.tokenMint, offer.token_mint, offer.mint, offer.mintAddress);
+  if (offerMint && offerMint !== mint) return false;
+  return Boolean(marketPriceSol(offer, 'offer'));
+}
+async function inspectArbitrageMint(candidate) {
+  const [listingPayload, offersPayload] = await Promise.all([
+    magicEdenGet('/tokens/' + encodeURIComponent(candidate.mint) + '/listings', { offset:0, limit:20 }),
+    magicEdenGet('/tokens/' + encodeURIComponent(candidate.mint) + '/offers_received', { offset:0, limit:100, sort:'bidAmount', sort_direction:'desc' })
+  ]);
+  const listings = rowsFromMagicEden(listingPayload).map(row => ({ row, price:marketPriceSol(row,'listing') }))
+    .filter(x => x.price !== null);
+  if (!listings.length) { arbitrageScanner.opportunities.delete(candidate.mint); return; }
+  const listing = listings.sort((a,b)=>a.price-b.price)[0];
+  const offers = rowsFromMagicEden(offersPayload).filter(offer=>offerIsEligible(offer,candidate.mint))
+    .map(row=>({row,price:marketPriceSol(row,'offer')})).filter(x=>x.price!==null)
+    .sort((a,b)=>b.price-a.price);
+  if (!offers.length) { arbitrageScanner.opportunities.delete(candidate.mint); return; }
+  const best = offers[0];
+  const listingRow = listing.row;
+  const listingSeller = pickText(listingRow.seller, listingRow.owner, listingRow.sellerAddress);
+  const bidBuyer = pickText(best.row.buyer, best.row.buyerAddress, best.row.bidder, best.row.owner);
+  const spread = best.price - listing.price;
+  if (spread <= 0) { arbitrageScanner.opportunities.delete(candidate.mint); return; }
+  arbitrageScanner.opportunities.set(candidate.mint, {
+    mint:candidate.mint, name:candidate.name || 'Solana NFT', image:candidate.image || null,
+    symbol:candidate.symbol || '', collectionName:candidate.collectionName || '',
+    listingPrice:listing.price, highestOffer:best.price, grossSpread:spread,
+    listingSeller, bidBuyer, offerExpiry:best.row.expiry ?? best.row.expiresAt ?? best.row.expiration ?? null,
+    checkedAt:new Date().toISOString(), marketplace:'Magic Eden',
+    url:'https://magiceden.io/item-details/'+encodeURIComponent(candidate.mint)
+  });
+}
+async function runArbitrageScanner() {
+  if (arbitrageScanner.running) return;
+  arbitrageScanner.running = true;
+  try {
+    while (true) {
+      const next = arbitrageScanner.queue.entries().next();
+      if (next.done) { await new Promise(resolve=>setTimeout(resolve,5000)); continue; }
+      const [mint,candidate] = next.value;
+      arbitrageScanner.queue.delete(mint);
+      try {
+        await inspectArbitrageMint(candidate);
+        arbitrageScanner.checked++;
+        arbitrageScanner.lastError = null;
+      } catch (error) {
+        arbitrageScanner.errors++;
+        arbitrageScanner.lastError = error.message;
+        console.warn('Magic Eden arbitrage lookup failed for', mint, error.status || 'network', error.message);
+      }
+      arbitrageScanner.scanned++;
+      arbitrageScanner.lastScanAt = new Date().toISOString();
+      await new Promise(resolve=>setTimeout(resolve,20000));
+    }
+  } finally { arbitrageScanner.running = false; }
+}
+function ensureArbitrageScanner() {
+  if (!arbitrageScanner.running) runArbitrageScanner().catch(error=>{
+    arbitrageScanner.running=false; arbitrageScanner.lastError=error.message;
+    console.error('Magic Eden arbitrage scanner stopped:',error.message);
+  });
+}
+
 function pickText(...values) { return values.find(value => typeof value === 'string' && value.trim())?.trim() || null; }
 function readMagicEdenCollection(token) {
   const collection = token?.collection && typeof token.collection === 'object' ? token.collection : {};
@@ -797,7 +917,7 @@ async function scanMagicEdenCollection(collection) {
       const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset, limit: 100 });
       const rows = findListingRows(raw);
       magicEdenScanner.rawActivityRows += rows.length;
-      for (const item of rows) recordMagicEdenActivitySale(item, collection);
+      for (const item of rows) { recordMagicEdenActivitySale(item, collection); enqueueArbitrageListing(item, collection); }
       if (rows.length < 100) break;
       const pageTimes = rows.map(item => normalizeMagicEdenActivityTime(
         item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ?? item.createdAt ?? item.created_at ?? null
@@ -1060,6 +1180,17 @@ app.get('/api/market/collections', async (req, res) => {
     console.error('NFT marketplace feed failed:', error.status || 'network', error.message);
     res.status(error.status || 502).json({ success:false, source:'NFT marketplace feed', error:error.message, details:error.details || undefined });
   }
+});
+
+app.get('/api/market/arbitrage', (req, res) => {
+  ensureArbitrageScanner();
+  const opportunities=[...arbitrageScanner.opportunities.values()]
+    .sort((a,b)=>b.grossSpread-a.grossSpread).slice(0,100);
+  res.json({success:true,source:'Magic Eden public Solana API',mode:'read-only',
+    opportunities,stats:{queued:arbitrageScanner.queue.size,checked:arbitrageScanner.checked,
+      scanned:arbitrageScanner.scanned,errors:arbitrageScanner.errors,dropped:arbitrageScanner.dropped,
+      running:arbitrageScanner.running,lastScanAt:arbitrageScanner.lastScanAt,lastError:arbitrageScanner.lastError},
+    note:'Only current Magic Eden token listings are compared with token-specific received offers. Expired or explicitly inactive offers are excluded. Gross spread is before marketplace fees, royalties and transaction costs. Scanner discovers listing activity while the existing all-collection activity scan rotates through Magic Eden collections; coverage is limited to Magic Eden.'});
 });
 app.get('/api/market/collection/:symbol/activities', async (req, res) => {
   const symbol = String(req.params.symbol || '').trim();
