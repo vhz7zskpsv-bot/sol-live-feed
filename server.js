@@ -585,7 +585,8 @@ const magicEdenScanner = {
   missingTimestampSales: 0, activityTypeCounts: {}, errors: [],
   directoryPages: 0, directoryCollectionsAvailable: 0,
   cycleStartedAt: null, lastCycleCompletedAt: null, lastUpdatedAt: null,
-  stateLoaded: false, savePending: false
+  stateLoaded: false, savePending: false,
+  hotCollections: [], hotCollectionIndex: 0, hotCollectionScanAt: 0
 };
 
 function loadMagicEdenScannerState() {
@@ -698,6 +699,34 @@ async function getAllMagicEdenCollections() {
   return magicEdenDirectorySnapshot.pending;
 }
 
+async function refreshMagicEdenHotCollections() {
+  if (magicEdenScanner.hotCollections.length &&
+      Date.now() - magicEdenScanner.hotCollectionScanAt < 120000) return;
+  try {
+    const raw = await magicEdenGet('/marketplace/popular_collections', { timeRange: '1d' });
+    const rows = Array.isArray(raw) ? raw :
+      (raw?.collections || raw?.results || raw?.data || raw?.items || []);
+    const bySymbol = new Map();
+    rows.filter(row => row && (row.symbol || row.collectionSymbol))
+      .sort((a, b) => Number(b.volumeAll || b.volume24hr || b.volume_24hr || b.volume_24hr_sol || 0) -
+                      Number(a.volumeAll || a.volume24hr || a.volume_24hr || a.volume_24hr_sol || 0))
+      .forEach(row => {
+        const symbol = String(row.symbol || row.collectionSymbol).trim();
+        if (symbol && !bySymbol.has(symbol.toLowerCase())) bySymbol.set(symbol.toLowerCase(), normalizeCollection(row));
+      });
+    magicEdenScanner.hotCollections = [...bySymbol.values()].slice(0, 40);
+    if (!magicEdenScanner.hotCollections.length) magicEdenScanner.hotCollections = magicEdenScanner.collections.slice(0, 40);
+    magicEdenScanner.hotCollectionIndex = 0;
+    magicEdenScanner.hotCollectionScanAt = Date.now();
+    console.log('Magic Eden priority collection refresh:', magicEdenScanner.hotCollections.length);
+  } catch (error) {
+    console.warn('Magic Eden priority collection refresh failed:', error.status || 'network', error.message);
+    if (!magicEdenScanner.hotCollections.length) magicEdenScanner.hotCollections = magicEdenScanner.collections.slice(0, 40);
+    magicEdenScanner.hotCollectionIndex = 0;
+    magicEdenScanner.hotCollectionScanAt = Date.now();
+  }
+}
+
 function recordMagicEdenActivitySale(item, collection) {
   const originalType = String(item.type || item.activityType || item.activity_type || item.txType || '').trim();
   const normalizedType = originalType.toLowerCase().replace(/[^a-z]/g, '');
@@ -802,6 +831,23 @@ async function runMagicEdenSalesScanner() {
 
         if (!magicEdenScanner.collections.length) {
           await new Promise(resolve => setTimeout(resolve, 30000));
+          continue;
+        }
+
+        // Re-scan the most active collections every two minutes so new sales
+        // do not wait for the full directory cycle.
+        if (!magicEdenScanner.hotCollections.length ||
+            Date.now() - magicEdenScanner.hotCollectionScanAt >= 120000) {
+          await refreshMagicEdenHotCollections();
+        }
+        if (magicEdenScanner.hotCollectionIndex < magicEdenScanner.hotCollections.length) {
+          const hotCollection = magicEdenScanner.hotCollections[magicEdenScanner.hotCollectionIndex];
+          await scanMagicEdenCollection(hotCollection);
+          magicEdenScanner.hotCollectionIndex++;
+          if (magicEdenScanner.hotCollectionIndex >= magicEdenScanner.hotCollections.length) {
+            magicEdenScanner.hotCollectionScanAt = Date.now();
+          }
+          saveMagicEdenScannerState();
           continue;
         }
 
