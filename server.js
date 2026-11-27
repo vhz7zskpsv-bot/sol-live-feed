@@ -244,14 +244,14 @@ async function getRecentSolanaMints() {
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
   }
-  const collections = [...grouped.values()].sort((a,b) => new Date(b.latestMintAt || 0).getTime() - new Date(a.latestMintAt || 0).getTime());
+  const collections = [...grouped.values()].filter(group => group.observedMints >= 15).sort((a,b) => new Date(b.latestMintAt || 0).getTime() - new Date(a.latestMintAt || 0).getTime());
   const data = {
     configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections,
     diagnostics: {
       source: 'Bitquery Solana Instructions + QuickNode Metaplex DAS',
       instructionsFound: rows.length, uniqueAssetCandidates: candidates.size,
       hydratedAssets: assets.length, candidatesHydrated: discovered.length,
-      standards: ['standard Token Metadata NFTs', 'compressed NFTs (Bubblegum, when the transaction log exposes Leaf asset ID)', 'MPL Core'],
+      standards: ['standard Token Metadata NFTs', 'compressed NFTs (Bubblegum, when the transaction log exposes Leaf asset ID)', 'MPL Core', 'LaunchMyNFT'],
       note: 'Only successfully hydrated assets are shown. Bubblegum mints without a decoded Leaf asset ID are not yet resolvable by this feed.'
     },
     note: 'Recent creations are discovered from on-chain program instructions and hydrated through DAS. Collection counts are observed mints in this scan, not total collection supply.'
@@ -299,9 +299,7 @@ async function getRecentSolanaMintsFree() {
           const message = tx?.transaction?.message || {};
           const keys = (message.accountKeys || []).map(k => typeof k === 'string' ? k : k.pubkey);
           const instructions = [...(message.instructions || []), ...((tx?.meta?.innerInstructions || []).flatMap(x => x.instructions || []))];
-          for (const ix of instructions) {
-            const programId = ix.programId || keys[ix.programIdIndex] || '';
-            const logs = (tx?.meta?.logMessages || []).join('\n');
+          const logs = (tx?.meta?.logMessages || []).join('\n');
             const targetInstructions = program.kind === 'launchmynft'
               ? instructions.filter(item => [
                   'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',
@@ -324,7 +322,6 @@ async function getRecentSolanaMintsFree() {
                 creator:tx?.transaction?.message?.accountKeys?.find(k => typeof k === 'object' && k.signer)?.pubkey || null,
                 createdAt:tx?.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null });
             }
-          }
         } catch (error) {
           console.error('Solana public RPC transaction lookup failed:', error.status || 'network', error.message);
         }
@@ -365,6 +362,7 @@ async function getRecentSolanaMintsFree() {
       image:asset.collectionImage || asset.image, collectionAddress:asset.collectionAddress, verified:asset.verified,
       observedMints:0, mintedCount:0, latestMintAt:asset.createdAt, sampleAssets:[], supply:null, supplySource:'Maximum collection supply is not published in DAS asset metadata' };
     group.observedMints++;
+    group.mintedCount = group.observedMints;
     if (asset.createdAt && (!group.latestMintAt || new Date(asset.createdAt) > new Date(group.latestMintAt))) group.latestMintAt = asset.createdAt;
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
