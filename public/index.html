@@ -13,8 +13,10 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 .empty{padding:32px 18px;text-align:center;color:var(--muted);font-size:12px}.notice{margin:14px 12px 14px;padding:11px 13px;border:1px solid #51452c;background:#241d12;color:#d8bd84;border-radius:10px;font-size:11px;line-height:1.5}.launchGrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;padding:0 14px 14px}.launchCard{display:block;background:#0a1421;border:1px solid #1b2c43;border-radius:11px;overflow:hidden;min-width:0;color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}.launchCard:hover{border-color:#3484a4;transform:translateY(-2px)}.launchCard img{width:100%;aspect-ratio:1/1;object-fit:cover;background:#111d2d;display:block}.launchBody{padding:10px}.launchName{font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.launchMeta{font-size:10px;color:var(--muted);margin-top:5px;line-height:1.5}.launchTag{display:inline-block;border:1px solid #35506b;border-radius:20px;padding:3px 7px;font-size:9px;color:#9edcf0;margin-top:7px}.launchOpen{display:block;color:var(--cyan);font-size:10px;margin-top:8px}.footer{color:#62758e;font-size:10px;text-align:center;margin-top:18px}.hidden{display:none!important}
 @media(max-width:1100px){.launchGrid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:950px){.layout{grid-template-columns:1fr}.side{display:grid;grid-template-columns:1fr 1fr}.stats{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.launchGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 9px 10px}main{padding:16px 11px 40px}.header{align-items:flex-start}.headerRight{flex-direction:column;align-items:flex-end}.stats{gap:8px}.stat{padding:12px}.statValue{font-size:19px}.collectionGrid{grid-template-columns:1fr;padding:0 9px 10px}.side{display:flex}.listingGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}.search{min-width:150px;flex:1}.toolbar{padding:11px}.sectionHead{padding:14px}}
+
+.walletBox{display:flex;flex-direction:column;align-items:flex-end;gap:7px;min-width:270px}.walletActions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.walletBtn,.walletDisconnect{border:1px solid #2b5471;background:linear-gradient(135deg,#10283b,#17233d);color:#dff8ff;border-radius:9px;padding:9px 12px;font:600 12px system-ui,sans-serif;cursor:pointer}.walletBtn:hover,.walletDisconnect:hover{border-color:var(--cyan);box-shadow:0 0 16px #35caff25}.solflareBtn{border-color:#59477f;background:linear-gradient(135deg,#2b1e48,#18213b)}.walletConnected{width:100%;max-width:390px;padding:9px 11px;border:1px solid #28536a;border-radius:11px;background:#0b1b2b}.walletIdentity,.walletBalance{display:flex;align-items:center;gap:8px;justify-content:space-between}.walletIdentity{font-size:11px;color:var(--muted)}.walletIdentity strong{color:#dff8ff;font-size:12px}.walletDot{width:7px;height:7px;border-radius:50%;background:#68efb2;box-shadow:0 0 9px #68efb2;flex:none}.walletBalance{margin-top:8px;color:var(--cyan);font-size:12px;font-weight:700}.walletDisconnect{padding:5px 8px;font-size:10px}.walletStatus{max-width:390px;color:var(--muted);font-size:10px;text-align:right;line-height:1.4}.walletBox [hidden]{display:none!important}@media(max-width:760px){.header{align-items:flex-start;flex-direction:column}.headerRight{width:100%;align-items:stretch;flex-direction:column}.walletBox{width:100%;align-items:stretch;min-width:0}.walletActions{justify-content:flex-start}.walletStatus{text-align:left}.walletConnected{max-width:none}.walletIdentity strong{font-size:11px}}
 </style></head><body><main>
-<header class="header"><div class="brand"><div class="logo">✦</div><div><h1>Solana NFT Market Pulse</h1><div class="sub">Live collections ranked by real marketplace sales</div></div></div><div class="headerRight"><span class="pill"><i class="liveDot"></i>READ ONLY · LIVE DATA</span><span class="pill">No wallet · No Helius</span></div></header>
+<header class="header"><div class="brand"><div class="logo">✦</div><div><h1>Solana NFT Market Pulse</h1><div class="sub">Live collections ranked by real marketplace sales</div></div></div><div class="headerRight"><span class="pill"><i class="liveDot"></i>READ ONLY · LIVE DATA</span><div class="walletBox"><div class="walletActions"><button class="walletBtn phantomBtn" id="connectPhantom" type="button">Connect Phantom</button><button class="walletBtn solflareBtn" id="connectSolflare" type="button">Connect Solflare</button></div><div class="walletConnected" id="walletConnected" hidden><div class="walletIdentity"><span class="walletDot"></span><span id="walletName">Wallet</span><strong id="walletAddress">—</strong></div><div class="walletBalance"><span id="walletBalance">Balance loading…</span><button class="walletDisconnect" id="disconnectWallet" type="button">Disconnect</button></div></div><div class="walletStatus" id="walletStatus" role="status" aria-live="polite">Connect a wallet to view its public address and SOL balance. No transactions.</div></div></div></header>
 <section class="stats"><div class="stat"><div class="statLabel">Active collections</div><div class="statValue" id="activeCount">—</div><div class="statHint">Collections with verified collection identity</div></div><div class="stat"><div class="statLabel">Recent sales</div><div class="statValue" id="salesCount">—</div><div class="statHint">Decoded Magic Eden trades</div></div><div class="stat"><div class="statLabel">SOL volume</div><div class="statValue" id="volumeSol">—</div><div class="statHint">SOL-denominated sale amounts only</div></div><div class="stat"><div class="statLabel">Data sources</div><div class="statValue" style="font-size:17px">3 APIs</div><div class="statHint">Magic Eden + Solana RPC + QuickNode DAS</div></div></section>
 <section class="panel toolbar"><div class="filters"><span style="color:var(--muted);font-size:11px;margin-right:3px">WINDOW</span><button class="filter" data-min="10">10m</button><button class="filter active" data-min="15">15m</button><button class="filter" data-min="60">1h</button><button class="filter" data-min="1440">24h</button></div><div class="filters"><input id="search" class="search" placeholder="Search collections…"><button class="refresh" id="refresh">↻ Refresh</button></div></section>
 <div class="layout"><section class="panel"><div class="sectionHead"><h2>Collections</h2><span id="collectionCount">Loading…</span></div><div id="collections" class="collectionGrid"><div class="empty">Fetching live collection activity…</div></div><div id="allNotice" class="notice hidden"></div></section>
@@ -23,13 +25,81 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 <section class="panel" style="margin-top:15px"><div class="sectionHead"><h2>Bid Arbitrage · Individual NFT Offers</h2><span id="arbStatus">Starting scanner…</span></div><div id="arbNotice" class="notice">Read-only scanner. It checks current individual NFT listings against offers received for that exact NFT. Estimated gross spread excludes fees and royalties.</div><div id="arbGrid" class="listingGrid"><div class="empty">Waiting for Magic Eden listing activity to rotate through the collection directory…</div></div></section>
 <section class="panel" style="margin-top:15px"><div class="sectionHead"><h2>New Solana Mints · Unverified Launches</h2><span id="launchStatus">Checking free Solana RPC…</span></div><div id="launchNotice" class="notice hidden"></div><div id="launchGrid" class="launchGrid"><div class="empty">Scanning recent Solana NFT program transactions…</div></div></section>
 <section id="detail" class="panel detail hidden"><div class="detailTop"><div class="avatar" id="detailAvatar">NFT</div><div><h2 id="detailName">Collection</h2><div class="muted" id="detailMeta"></div></div><div class="detailActions"><a id="magicLink" class="close" target="_blank" rel="noopener" style="text-decoration:none">Open Collection on Magic Eden ↗</a><button class="close" id="closeDetail">Close</button></div></div><div class="detailTabs"><button class="detailTab active" id="activeListingsTab">Active Listings</button><button class="detailTab" id="recentSalesTab">Recent Sales</button></div><div class="sectionHead"><h2 id="detailTabTitle">Active Listings</h2><span id="listingCount">Loading…</span></div><div id="listings" class="listingGrid"><div class="empty">Loading collection listings from API.SH…</div></div></section>
-<div class="footer">Read-only public data · No wallet connection · No transactions · No synthetic sales or listing records</div>
+<div class="footer">Read-only public market data · Wallet connection only · No transaction signing or purchases · No synthetic sales or listing records</div>
 </main>
 <script>
 let selectedMinutes=15, allCollections=[], latestSales=[], latestSalesDiagnostics=null, marketRequest=false, marketRefreshQueued=false, marketLoaded=false, currentCollectionSymbol='', currentDetailTab='listings';
 const $=id=>document.getElementById(id);
 function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function short(v){if(!v)return '—';const s=String(v);return s.length>13?s.slice(0,5)+'…'+s.slice(-5):s}
+const SOLANA_RPC='https://api.mainnet-beta.solana.com';
+let activeWalletProvider=null,activeWalletName='';
+function walletProvider(name){
+  if(name==='Phantom')return window.phantom?.solana||(window.solana?.isPhantom?window.solana:null);
+  if(name==='Solflare')return window.solflare||(window.solana?.isSolflare?window.solana:null);
+  return null;
+}
+function setWalletStatus(message){const el=$('walletStatus');if(el)el.textContent=message}
+function showWallet(provider,name,address){
+  activeWalletProvider=provider;activeWalletName=name;
+  $('walletName').textContent=name;
+  $('walletAddress').textContent=short(address);
+  $('walletAddress').title=address;
+  $('walletConnected').hidden=false;
+  document.querySelector('.walletActions').hidden=true;
+  setWalletStatus('Connected · Read-only access. No transaction permissions requested.');
+  refreshWalletBalance(address);
+}
+async function refreshWalletBalance(address){
+  const target=$('walletBalance');target.textContent='Balance loading…';
+  try{
+    const response=await fetch(SOLANA_RPC,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getBalance',params:[address,{commitment:'confirmed'}]})});
+    const data=await response.json();
+    if(!response.ok||data.error||!Number.isFinite(data.result?.value))throw new Error('Balance temporarily unavailable');
+    target.textContent=(data.result.value/1e9).toLocaleString(undefined,{maximumFractionDigits:4})+' SOL';
+  }catch(error){target.textContent='SOL balance unavailable';}
+}
+async function connectWallet(name){
+  const provider=walletProvider(name);
+  if(!provider){setWalletStatus(name+' not detected. Open this dashboard inside the '+name+' app browser, or install the wallet.');return;}
+  try{
+    setWalletStatus('Connecting to '+name+'…');
+    const result=await provider.connect();
+    const key=result?.publicKey||provider.publicKey;
+    if(!key)throw new Error('Wallet did not return a public address');
+    const address=key.toString();
+    if(!address)throw new Error('Wallet returned an empty public address');
+    showWallet(provider,name,address);
+    if(typeof provider.on==='function'){
+      provider.on('accountChanged',nextKey=>{
+        if(nextKey){showWallet(provider,name,nextKey.toString());}
+        else clearWallet('Wallet disconnected.');
+      });
+      provider.on('disconnect',()=>clearWallet('Wallet disconnected.'));
+    }
+  }catch(error){
+    setWalletStatus(error?.message==='User rejected the request'?'Connection cancelled in wallet.':('Could not connect: '+(error?.message||'Unknown wallet error')));
+  }
+}
+function clearWallet(message='Wallet disconnected.'){
+  activeWalletProvider=null;activeWalletName='';
+  $('walletConnected').hidden=true;
+  document.querySelector('.walletActions').hidden=false;
+  $('walletBalance').textContent='—';
+  $('walletAddress').textContent='—';
+  setWalletStatus(message+' No funds were moved.');
+}
+$('connectPhantom').addEventListener('click',()=>connectWallet('Phantom'));
+$('connectSolflare').addEventListener('click',()=>connectWallet('Solflare'));
+$('disconnectWallet').addEventListener('click',async()=>{
+  const provider=activeWalletProvider;
+  try{if(provider&&typeof provider.disconnect==='function')await provider.disconnect();}catch(error){}
+  clearWallet();
+});
+setInterval(()=>{
+  if(activeWalletProvider?.publicKey)refreshWalletBalance(activeWalletProvider.publicKey.toString());
+},60000);
+
 function timeAgo(v){if(!v)return '';const sec=Math.max(0,Math.floor((Date.now()-new Date(v).getTime())/1000));if(sec<60)return sec+'s ago';if(sec<3600)return Math.floor(sec/60)+'m ago';return Math.floor(sec/3600)+'h ago'}
 function money(v){if(v===null||v===undefined||v==='')return '—';const n=Number(v);return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:4}):String(v)}
 function arrFrom(value,keys,predicate){if(!value)return [];if(Array.isArray(value)){if(value.some(predicate))return value;for(const x of value){const a=arrFrom(x,keys,predicate);if(a.length)return a}return []}if(typeof value==='object'){for(const k of keys){if(k in value){const a=arrFrom(value[k],keys,predicate);if(a.length)return a}}for(const x of Object.values(value)){const a=arrFrom(x,keys,predicate);if(a.length)return a}}return []}
