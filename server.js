@@ -16,6 +16,9 @@ const QUICKNODE_RPC_URL = process.env.QUICKNODE_RPC_URL;
 const MAGIC_EDEN_API_BASE = 'https://api-mainnet.magiceden.dev/v2';
 let magicEdenQueue = Promise.resolve();
 let magicEdenLastRequestAt = 0;
+let magicEdenActiveRequests = 0;
+const MAGIC_EDEN_MIN_REQUEST_INTERVAL_MS = 600;
+const MAGIC_EDEN_MAX_CONCURRENT_REQUESTS = 4;
 let bitqueryToken = null;
 let bitqueryTokenExpiresAt = 0;
 
@@ -431,20 +434,32 @@ function normalizeCollection(x) {
     verified: x.isVerified ?? x.verified ?? false, collectionAddress, raw: x };
 }
 async function magicEdenGet(path, query = {}) {
-  const run = async () => {
-    const wait = Math.max(0, 800 - (Date.now() - magicEdenLastRequestAt));
+  // Schedule request starts at a safe 100 requests/minute (below Magic Eden's
+  // documented 120 QPM ceiling), while allowing a small bounded number of
+  // in-flight requests. The old queue serialized network completion as well as
+  // request starts, so slow responses unnecessarily stalled every scanner.
+  const scheduled = magicEdenQueue.then(async () => {
+    while (magicEdenActiveRequests >= MAGIC_EDEN_MAX_CONCURRENT_REQUESTS) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    const wait = Math.max(0, MAGIC_EDEN_MIN_REQUEST_INTERVAL_MS - (Date.now() - magicEdenLastRequestAt));
     if (wait) await new Promise(resolve => setTimeout(resolve, wait));
     magicEdenLastRequestAt = Date.now();
+    magicEdenActiveRequests++;
+  });
+  magicEdenQueue = scheduled.then(() => undefined, () => undefined);
+  await scheduled;
+
+  try {
     const url = new URL(MAGIC_EDEN_API_BASE + path);
     for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== null && String(value).length) url.searchParams.set(key, String(value));
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) { const error = new Error(body?.error || body?.message || 'Magic Eden returned HTTP ' + response.status); error.status = response.status; throw error; }
     return body;
-  };
-  const pending = magicEdenQueue.then(run, run);
-  magicEdenQueue = pending.then(() => undefined, () => undefined);
-  return pending;
+  } finally {
+    magicEdenActiveRequests = Math.max(0, magicEdenActiveRequests - 1);
+  }
 }
 
 const arbitrageScanner = {
