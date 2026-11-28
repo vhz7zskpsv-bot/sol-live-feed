@@ -703,6 +703,7 @@ const SALES_STATE_FILE = process.env.SALES_STATE_FILE || '/tmp/nft-sales-scanner
 const magicEdenScanner = {
   running: false, collections: [], index: 0, cycle: 0,
   salesById: new Map(), rawActivityRows: 0, recognizedSaleRows: 0,
+  knownDirectorySymbols: new Set(), priorityCollections: [], priorityCollectionSymbols: new Set(), lastScannedSymbol: null,
   missingTimestampSales: 0, activityTypeCounts: {}, activitySamples: [], errors: [],
   directoryPages: 0, directoryCollectionsAvailable: 0,
   cycleStartedAt: null, lastCycleCompletedAt: null, lastUpdatedAt: null,
@@ -723,6 +724,13 @@ function loadMagicEdenScannerState() {
       return [identity, sale];
     }));
     magicEdenScanner.index = Number.isInteger(saved.index) ? Math.max(0, saved.index) : 0;
+    magicEdenScanner.knownDirectorySymbols = new Set(Array.isArray(saved.directorySymbols) ? saved.directorySymbols.map(x => String(x).toLowerCase()) : []);
+    magicEdenScanner.lastScannedSymbol = saved.lastScannedSymbol || null;
+    if (!magicEdenScanner.knownDirectorySymbols.size && magicEdenScanner.index > 0) {
+      // Older state files did not persist the directory cursor symbol. Restart one full pass to avoid skipping collections.
+      magicEdenScanner.index = 0;
+      magicEdenScanner.lastScannedSymbol = null;
+    }
     magicEdenScanner.cycle = Number(saved.cycle) || 0;
     magicEdenScanner.lastUpdatedAt = saved.lastUpdatedAt || null;
     magicEdenScanner.lastCycleCompletedAt = saved.lastCycleCompletedAt || null;
@@ -742,6 +750,8 @@ function saveMagicEdenScannerState() {
       cycle: magicEdenScanner.cycle,
       lastUpdatedAt: magicEdenScanner.lastUpdatedAt,
       lastCycleCompletedAt: magicEdenScanner.lastCycleCompletedAt,
+      lastScannedSymbol: magicEdenScanner.lastScannedSymbol,
+      directorySymbols: [...magicEdenScanner.knownDirectorySymbols],
       sales: [...magicEdenScanner.salesById.values()]
     };
     const temp = SALES_STATE_FILE + '.tmp';
@@ -769,7 +779,7 @@ function normalizeMagicEdenActivityTime(rawTime) {
 
 async function getAllMagicEdenCollections() {
   if (magicEdenDirectorySnapshot.collections &&
-      Date.now() - magicEdenDirectorySnapshot.at < 6 * 60 * 60 * 1000) {
+      Date.now() - magicEdenDirectorySnapshot.at < 15 * 60 * 1000) {
     return magicEdenDirectorySnapshot;
   }
   if (magicEdenDirectorySnapshot.pending) return magicEdenDirectorySnapshot.pending;
@@ -808,6 +818,22 @@ async function getAllMagicEdenCollections() {
       if (rows.length < 500) break;
     }
     const result = { at: Date.now(), collections: [...bySymbol.values()], pages, pending: null };
+    const knownSymbols = magicEdenScanner.knownDirectorySymbols;
+    const newlyDiscovered = knownSymbols.size
+      ? result.collections.filter(collection => !knownSymbols.has(String(collection.symbol || '').toLowerCase()))
+      : [];
+    for (const collection of newlyDiscovered) {
+      const symbol = String(collection.symbol || '').toLowerCase();
+      if (symbol && !magicEdenScanner.priorityCollectionSymbols.has(symbol)) {
+        magicEdenScanner.priorityCollectionSymbols.add(symbol);
+        magicEdenScanner.priorityCollections.push(collection);
+      }
+    }
+    magicEdenScanner.knownDirectorySymbols = new Set(result.collections.map(collection => String(collection.symbol || '').toLowerCase()).filter(Boolean));
+    if (newlyDiscovered.length) {
+      console.log('Magic Eden directory refresh discovered', newlyDiscovered.length,
+        'new collections; queued', magicEdenScanner.priorityCollections.length, 'for priority scanning');
+    }
     magicEdenDirectorySnapshot.at = result.at;
     magicEdenDirectorySnapshot.collections = result.collections;
     magicEdenDirectorySnapshot.pages = result.pages;
@@ -940,6 +966,11 @@ async function runMagicEdenSalesScanner() {
       try {
         const directory = await getAllMagicEdenCollections();
         magicEdenScanner.collections = directory.collections;
+        if (magicEdenScanner.lastScannedSymbol) {
+          const cursorIndex = magicEdenScanner.collections.findIndex(collection =>
+            String(collection.symbol || '').toLowerCase() === String(magicEdenScanner.lastScannedSymbol).toLowerCase());
+          if (cursorIndex >= 0) magicEdenScanner.index = cursorIndex + 1;
+        }
         magicEdenScanner.directoryPages = directory.pages;
         magicEdenScanner.directoryCollectionsAvailable = directory.collections.length;
 
@@ -955,10 +986,19 @@ async function runMagicEdenSalesScanner() {
           continue;
         }
 
+        if (magicEdenScanner.priorityCollections.length) {
+          const priorityCollection = magicEdenScanner.priorityCollections.shift();
+          magicEdenScanner.priorityCollectionSymbols.delete(String(priorityCollection.symbol || '').toLowerCase());
+          await scanMagicEdenCollection(priorityCollection);
+          saveMagicEdenScannerState();
+          continue;
+        }
+
         if (magicEdenScanner.index >= magicEdenScanner.collections.length) {
           magicEdenScanner.lastCycleCompletedAt = new Date().toISOString();
           magicEdenScanner.cycle++;
           magicEdenScanner.index = 0;
+          magicEdenScanner.lastScannedSymbol = null;
           magicEdenScanner.cycleStartedAt = new Date().toISOString();
           saveMagicEdenScannerState();
           // Keep rolling diagnostic counters across cycles; sales themselves
@@ -968,6 +1008,7 @@ async function runMagicEdenSalesScanner() {
 
         const collection = magicEdenScanner.collections[magicEdenScanner.index];
         await scanMagicEdenCollection(collection);
+        magicEdenScanner.lastScannedSymbol = String(collection.symbol || '');
         magicEdenScanner.index++;
         saveMagicEdenScannerState();
       } catch (error) {
