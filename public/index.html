@@ -32,7 +32,7 @@ let selectedMinutes=15, allCollections=[], latestSales=[], latestSalesDiagnostic
 const $=id=>document.getElementById(id);
 function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function short(v){if(!v)return '—';const s=String(v);return s.length>13?s.slice(0,5)+'…'+s.slice(-5):s}
-const SOLANA_RPC='https://api.mainnet-beta.solana.com';
+const WALLET_BALANCE_ENDPOINT='/api/wallet/balance?address=';
 let activeWalletProvider=null,activeWalletName='';
 function walletProvider(name){
   if(name==='Phantom')return window.phantom?.solana||(window.solana?.isPhantom?window.solana:null);
@@ -53,11 +53,14 @@ function showWallet(provider,name,address){
 async function refreshWalletBalance(address){
   const target=$('walletBalance');target.textContent='Balance loading…';
   try{
-    const response=await fetch(SOLANA_RPC,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getBalance',params:[address,{commitment:'confirmed'}]})});
+    const response=await fetch(WALLET_BALANCE_ENDPOINT+encodeURIComponent(address),{headers:{'accept':'application/json'}});
     const data=await response.json();
-    if(!response.ok||data.error||!Number.isFinite(data.result?.value))throw new Error('Balance temporarily unavailable');
-    target.textContent=(data.result.value/1e9).toLocaleString(undefined,{maximumFractionDigits:4})+' SOL';
-  }catch(error){target.textContent='SOL balance unavailable';}
+    if(!response.ok||!data.success||!Number.isFinite(data.sol))throw new Error(data.error||'Balance temporarily unavailable');
+    target.textContent=data.sol.toLocaleString(undefined,{maximumFractionDigits:4})+' SOL';
+  }catch(error){
+    target.textContent='SOL balance unavailable';
+    setWalletStatus('Wallet connected · Balance service temporarily unavailable. Your wallet is still connected.');
+  }
 }
 async function connectWallet(name){
   const provider=walletProvider(name);
