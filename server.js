@@ -5,6 +5,8 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+const { createTensorScanner } = require('./tensor-scanner');
+const tensorScanner = createTensorScanner();
 const PORT = process.env.PORT || 8080;
 const API_SH_KEY = process.env.API_SH_KEY;
 const API_SH_BASE = 'https://api.api.sh';
@@ -1255,6 +1257,10 @@ app.get('/api/bitquery/test', async (req, res) => {
   }
 });
 
+app.get('/api/tensor/status', (req, res) => {
+  res.json({ success: true, ...tensorScanner.getStatus() });
+});
+
 app.get('/api/market/collections', async (req, res) => {
   const minutes = [10,15,60,1440].includes(Number(req.query.minutes)) ? Number(req.query.minutes) : 15;
   try {
@@ -1420,6 +1426,7 @@ async function loadData(path,label){
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`NFT Aggregator server running on 0.0.0.0:${PORT}`);
+  tensorScanner.start();
   console.log('Sales feed: continuous scan of the full Magic Eden public collection directory and recent collection activities.');
   console.log('Mint discovery: Solana public RPC. Asset metadata hydration: existing QuickNode Metaplex DAS endpoint.');
 });

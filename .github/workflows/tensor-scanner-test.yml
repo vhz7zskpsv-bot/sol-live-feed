@@ -1,0 +1,29 @@
+name: Tensor scanner isolated tests
+
+on:
+  push:
+    branches: [feature/tensor-onchain-sales-prototype]
+    paths:
+      - 'tensor-scanner.js'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/tensor-scanner-test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tensor-scanner.js'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/tensor-scanner-test.yml'
+
+jobs:
+  tensor-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --ignore-scripts
+      - run: node --check tensor-scanner.js
+      - run: node --test
