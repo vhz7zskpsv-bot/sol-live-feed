@@ -265,21 +265,44 @@ async function getRecentSolanaMints() {
 }
 
 const SOLANA_PUBLIC_RPC_URL = 'https://api.mainnet-beta.solana.com';
-async function solanaPublicRpc(method, params) {
-  const response = await fetch(SOLANA_PUBLIC_RPC_URL, {
-    method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 'free-nft-mint-scan', method, params }),
-    signal: AbortSignal.timeout(20000)
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.error) {
-    const error = new Error(payload.error?.message || 'Solana public RPC returned HTTP ' + response.status);
-    error.status = response.status || 502;
-    throw error;
+let solanaRpcQueue = Promise.resolve();
+let solanaRpcLastStartedAt = 0;
+async function solanaPublicRpcRequest(method, params) {
+  const wait = Math.max(0, 900 - (Date.now() - solanaRpcLastStartedAt));
+  if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    solanaRpcLastStartedAt = Date.now();
+    const response = await fetch(SOLANA_PUBLIC_RPC_URL, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'free-nft-mint-scan', method, params }),
+      signal: AbortSignal.timeout(20000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    const rateLimited = response.status === 429 || /too many requests|rate.?limit/i.test(payload.error?.message || '');
+    if (rateLimited && attempt < 3) {
+      const backoff = 1500 * (2 ** attempt);
+      console.warn('Solana public RPC rate limited; retrying after backoff', { method, backoffMs: backoff });
+      await new Promise(resolve => setTimeout(resolve, backoff));
+      continue;
+    }
+    if (!response.ok || payload.error) {
+      const error = new Error(payload.error?.message || 'Solana public RPC returned HTTP ' + response.status);
+      error.status = response.status || 502;
+      throw error;
+    }
+    return payload.result;
   }
-  return payload.result;
 }
-async function getRecentSolanaMintsFree() {
+function solanaPublicRpc(method, params) {
+  const request = solanaRpcQueue.then(
+    () => solanaPublicRpcRequest(method, params),
+    () => solanaPublicRpcRequest(method, params)
+  );
+  solanaRpcQueue = request.catch(() => {});
+  return request;
+}
+let launchScanPending = null;
+async function scanRecentSolanaMintsFree() {
   if (launchCache.data && Date.now() - launchCache.at < 45000) return launchCache.data;
   if (!QUICKNODE_RPC_URL) return { configured:false, scannedAt:null, assets:[], collections:[], note:'QuickNode DAS is required to hydrate detected NFT mint IDs. No paid indexer is used for discovery.' };
   const programs = [
@@ -376,6 +399,12 @@ async function getRecentSolanaMintsFree() {
       note:'Free public RPC is rate-limited. Bubblegum cNFT asset IDs are not guaranteed to be present in logs, so cNFT coverage is incomplete.' },
     note:'Only collections with at least 15 successfully detected mints are displayed. Counts are observed in the current scan, not guaranteed total collection supply. Maximum supply is shown only when on-chain metadata publishes it; otherwise it is not disclosed.' };
   launchCache.at = Date.now(); launchCache.data = data; return data;
+}
+function getRecentSolanaMintsFree() {
+  if (launchCache.data && Date.now() - launchCache.at < 45000) return Promise.resolve(launchCache.data);
+  if (launchScanPending) return launchScanPending;
+  launchScanPending = scanRecentSolanaMintsFree().finally(() => { launchScanPending = null; });
+  return launchScanPending;
 }
 
 function findArray(value, predicate, depth = 0) {
