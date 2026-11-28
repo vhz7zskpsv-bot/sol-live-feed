@@ -247,7 +247,7 @@ async function getRecentSolanaMints() {
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
   }
-  const collections = [...grouped.values()].filter(group => group.observedMints >= 15).sort((a,b) => new Date(b.latestMintAt || 0).getTime() - new Date(a.latestMintAt || 0).getTime());
+  const collections = [...grouped.values()].filter(group => group.observedMints >= 1).sort((a,b) => new Date(b.latestMintAt || 0).getTime() - new Date(a.latestMintAt || 0).getTime());
   const data = {
     configured: true, scannedAt: new Date().toISOString(), assets: assets.slice(0, 80), collections,
     diagnostics: {
@@ -404,11 +404,11 @@ async function scanRecentSolanaMintsFree() {
     if (group.sampleAssets.length < 6) group.sampleAssets.push(asset);
     grouped.set(key, group);
   }
-  const data = { configured:true, scannedAt:new Date().toISOString(), assets, collections:[...grouped.values()].filter(group => group.observedMints >= 15).sort((a,b)=>new Date(b.latestMintAt||0)-new Date(a.latestMintAt||0)),
+  const data = { configured:true, scannedAt:new Date().toISOString(), assets, collections:[...grouped.values()].filter(group => group.observedMints >= 1).sort((a,b)=>new Date(b.latestMintAt||0)-new Date(a.latestMintAt||0)),
     diagnostics:{ source:'Solana public RPC + QuickNode DAS', signaturesScanned, transactionsRead, uniqueAssetCandidates:candidates.size,
       hydratedAssets:assets.length, standards:['standard Token Metadata NFTs','MPL Core','compressed NFTs only when the transaction log exposes Leaf asset ID'],
       note:'Free public RPC is rate-limited. Bubblegum cNFT asset IDs are not guaranteed to be present in logs, so cNFT coverage is incomplete.' },
-    note:'Only collections with at least 15 successfully detected mints are displayed. Counts are observed in the current scan, not guaranteed total collection supply. Maximum supply is shown only when on-chain metadata publishes it; otherwise it is not disclosed.' };
+    note:'Collections with at least 1 successfully detected mint are displayed. Counts are observed in the current scan, not guaranteed total collection supply. Maximum supply is shown only when on-chain metadata publishes it; otherwise it is not disclosed.' };
   launchCache.at = Date.now(); launchCache.data = data; return data;
 }
 function getRecentSolanaMintsFree() {
