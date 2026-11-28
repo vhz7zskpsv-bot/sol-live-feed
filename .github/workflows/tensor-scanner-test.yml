@@ -1,6 +1,13 @@
 name: Tensor scanner isolated tests
 
 on:
+  push:
+    branches: [feature/tensor-onchain-sales-prototype]
+    paths:
+      - 'tensor-scanner.js'
+      - 'test/**'
+      - 'package.json'
+      - '.github/workflows/tensor-scanner-test.yml'
   pull_request:
     branches: [main]
     paths:
