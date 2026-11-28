@@ -725,6 +725,7 @@ function loadMagicEdenScannerState() {
     }));
     magicEdenScanner.index = Number.isInteger(saved.index) ? Math.max(0, saved.index) : 0;
     magicEdenScanner.knownDirectorySymbols = new Set(Array.isArray(saved.directorySymbols) ? saved.directorySymbols.map(x => String(x).toLowerCase()) : []);
+    magicEdenScanner.priorityCollectionSymbols = new Set(Array.isArray(saved.priorityCollectionSymbols) ? saved.priorityCollectionSymbols.map(x => String(x).toLowerCase()) : []);
     magicEdenScanner.lastScannedSymbol = saved.lastScannedSymbol || null;
     if (!magicEdenScanner.knownDirectorySymbols.size && magicEdenScanner.index > 0) {
       // Older state files did not persist the directory cursor symbol. Restart one full pass to avoid skipping collections.
@@ -752,6 +753,7 @@ function saveMagicEdenScannerState() {
       lastCycleCompletedAt: magicEdenScanner.lastCycleCompletedAt,
       lastScannedSymbol: magicEdenScanner.lastScannedSymbol,
       directorySymbols: [...magicEdenScanner.knownDirectorySymbols],
+      priorityCollectionSymbols: [...magicEdenScanner.priorityCollectionSymbols],
       sales: [...magicEdenScanner.salesById.values()]
     };
     const temp = SALES_STATE_FILE + '.tmp';
@@ -818,6 +820,13 @@ async function getAllMagicEdenCollections() {
       if (rows.length < 500) break;
     }
     const result = { at: Date.now(), collections: [...bySymbol.values()], pages, pending: null };
+    const pendingPrioritySymbols = magicEdenScanner.priorityCollectionSymbols;
+    for (const collection of result.collections) {
+      const symbol = String(collection.symbol || '').toLowerCase();
+      if (symbol && pendingPrioritySymbols.has(symbol) && !magicEdenScanner.priorityCollections.some(item => String(item.symbol || '').toLowerCase() === symbol)) {
+        magicEdenScanner.priorityCollections.push(collection);
+      }
+    }
     const knownSymbols = magicEdenScanner.knownDirectorySymbols;
     const newlyDiscovered = knownSymbols.size
       ? result.collections.filter(collection => !knownSymbols.has(String(collection.symbol || '').toLowerCase()))
