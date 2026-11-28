@@ -1203,7 +1203,7 @@ app.get('/api/bitquery/test', async (req, res) => {
 });
 
 app.get('/api/market/collections', async (req, res) => {
-  const minutes = [5,15,60,1440].includes(Number(req.query.minutes)) ? Number(req.query.minutes) : 15;
+  const minutes = [10,15,60,1440].includes(Number(req.query.minutes)) ? Number(req.query.minutes) : 15;
   try {
     const salesData = await getGlobalNftSales(minutes), collectionsByKey = new Map();
     for (const g of salesData.groups) {
