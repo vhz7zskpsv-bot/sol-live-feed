@@ -265,8 +265,12 @@ function createTensorScanner(options = {}) {
   function enqueue(signature, logs) {
     if (!signature || state.pending.has(signature)) return;
     state.transactionsObserved++;
+    if (state.transactionsObserved % 25 === 0) {
+      console.log('Tensor program transactions observed: ' + state.transactionsObserved);
+    }
     if (!isTensorSaleInstruction(logs)) return;
     state.saleInstructionsObserved++;
+    console.log('Tensor sale instruction candidate: ' + signature);
     const match = (logs || []).map(line => String(line).match(/Program log: Instruction: ([A-Za-z0-9_]+)/i)).find(Boolean);
     const instructionName = match?.[1] || 'Tensor sale';
     if (state.queue.length >= 200) {
