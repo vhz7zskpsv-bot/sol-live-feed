@@ -160,7 +160,7 @@ function createTensorScanner(options = {}) {
   };
 
   function recordSale(signature, blockTime, instructionName, event) {
-    const mint = event.assetId || (event.targetId || null);
+    const mint = event.assetId || null;
     if (!mint) return;
     const time = blockTime ? new Date(blockTime * 1000).toISOString() : null;
     if (!time || !Number.isFinite(Date.parse(time))) return;
@@ -177,7 +177,7 @@ function createTensorScanner(options = {}) {
       collectionSymbol: null,
       symbol: 'TENSOR',
       name: 'Tensor NFT · ' + mint.slice(0, 5) + '…' + mint.slice(-5),
-      price: Number(priceLamports) / LAMPORTS_PER_SOL,
+      price: event.currency ? null : Number(priceLamports) / LAMPORTS_PER_SOL,
       priceCurrency: event.currency ? 'SPL' : 'SOL',
       priceCurrencyMint: event.currency || 'So11111111111111111111111111111111111111112',
       amountLamports: event.amountLamports,
