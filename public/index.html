@@ -148,5 +148,8 @@ async function openCollection(collectionId){
 
 $('activeListingsTab').addEventListener('click',()=>setDetailTab('listings'));$('recentSalesTab').addEventListener('click',()=>setDetailTab('sales'));$('search').addEventListener('input',renderCollections);$('refresh').addEventListener('click',loadMarket);$('closeDetail').addEventListener('click',()=>$('detail').classList.add('hidden'));
 document.querySelectorAll('[data-min]').forEach(btn=>btn.addEventListener('click',()=>{selectedMinutes=Number(btn.dataset.min);document.querySelectorAll('[data-min]').forEach(x=>x.classList.toggle('active',x===btn));loadMarket()}));
-loadMarket();loadLaunches();loadArbitrage();setInterval(()=>{if(!document.hidden){loadMarket({silent:true});loadLaunches();loadArbitrage();}},60000);
+loadMarket();loadLaunches();loadArbitrage();
+setInterval(()=>{if(!document.hidden)loadMarket({silent:true});},15000);
+setInterval(()=>{if(!document.hidden)loadLaunches();},60000);
+setInterval(()=>{if(!document.hidden)loadArbitrage();},30000);
 </script></body></html>
