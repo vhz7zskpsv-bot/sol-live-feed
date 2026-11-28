@@ -291,6 +291,7 @@ function createTensorScanner(options = {}) {
     socket.on('open', () => {
       state.connection = 'connected';
       state.lastError = null;
+      console.log('Tensor RPC WebSocket connected; requesting logsSubscribe.');
       socket.send(JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -315,6 +316,7 @@ function createTensorScanner(options = {}) {
         state.subscriptionId = message.result;
         state.startedAt = state.startedAt || new Date().toISOString();
         state.lastError = null;
+        console.log('Tensor logsSubscribe active. Subscription ID: ' + message.result);
         return;
       }
       if (message.method !== 'logsNotification') return;
