@@ -938,14 +938,14 @@ async function refreshMagicEdenHotCollections() {
         const symbol = String(row.symbol || row.collectionSymbol).trim();
         if (symbol && !bySymbol.has(symbol.toLowerCase())) bySymbol.set(symbol.toLowerCase(), normalizeCollection(row));
       });
-    magicEdenScanner.hotCollections = [...bySymbol.values()].slice(0, 40);
-    if (!magicEdenScanner.hotCollections.length) magicEdenScanner.hotCollections = magicEdenScanner.collections.slice(0, 40);
+    magicEdenScanner.hotCollections = [...bySymbol.values()].slice(0, 60);
+    if (!magicEdenScanner.hotCollections.length) magicEdenScanner.hotCollections = magicEdenScanner.collections.slice(0, 60);
     magicEdenScanner.hotCollectionIndex = 0;
     magicEdenScanner.hotCollectionScanAt = Date.now();
     console.log('Magic Eden priority collection refresh:', magicEdenScanner.hotCollections.length);
   } catch (error) {
     console.warn('Magic Eden priority collection refresh failed:', error.status || 'network', error.message);
-    if (!magicEdenScanner.hotCollections.length) magicEdenScanner.hotCollections = magicEdenScanner.collections.slice(0, 40);
+    if (!magicEdenScanner.hotCollections.length) magicEdenScanner.hotCollections = magicEdenScanner.collections.slice(0, 60);
     magicEdenScanner.hotCollectionIndex = 0;
     magicEdenScanner.hotCollectionScanAt = Date.now();
   }
