@@ -4,8 +4,8 @@ const crypto = require('crypto');
 const WebSocket = require('ws');
 
 const TENSOR_MARKETPLACE_PROGRAM = 'TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp';
-const DEFAULT_RPC_HTTP = 'https://api.mainnet.solana.com';
-const DEFAULT_RPC_WS = 'wss://api.mainnet.solana.com';
+const DEFAULT_RPC_HTTP = 'https://api.mainnet-beta.solana.com';
+const DEFAULT_RPC_WS = 'wss://api.mainnet-beta.solana.com';
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const EVENT_DISCRIMINATOR = crypto.createHash('sha256')
   .update('global:tcomp_noop')
