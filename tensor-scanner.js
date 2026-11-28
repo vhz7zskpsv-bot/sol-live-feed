@@ -4,8 +4,8 @@ const crypto = require('crypto');
 const WebSocket = require('ws');
 
 const TENSOR_MARKETPLACE_PROGRAM = 'TCMPhJdwDryooaGtiocG1u3xcYbRpiJzb283XfCZsDp';
-const DEFAULT_RPC_HTTP = 'https://api.mainnet-beta.solana.com';
-const DEFAULT_RPC_WS = 'wss://api.mainnet-beta.solana.com';
+const DEFAULT_RPC_HTTP = 'https://api.mainnet.solana.com';
+const DEFAULT_RPC_WS = 'wss://api.mainnet.solana.com';
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const EVENT_DISCRIMINATOR = crypto.createHash('sha256')
   .update('global:tcomp_noop')
@@ -305,9 +305,16 @@ function createTensorScanner(options = {}) {
     socket.on('message', raw => {
       let message;
       try { message = JSON.parse(raw.toString()); } catch (_) { return; }
+      if (message.id === 1 && message.error) {
+        state.lastError = message.error.message || 'Solana RPC logsSubscribe rejected';
+        state.connection = 'subscription_error';
+        socket.close();
+        return;
+      }
       if (message.id === 1 && message.result) {
         state.subscriptionId = message.result;
         state.startedAt = state.startedAt || new Date().toISOString();
+        state.lastError = null;
         return;
       }
       if (message.method !== 'logsNotification') return;
