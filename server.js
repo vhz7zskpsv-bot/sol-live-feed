@@ -320,7 +320,7 @@ async function scanRecentSolanaMintsFree() {
       for (const sig of (signatures || [])) {
         if (sig.err) continue;
         try {
-          const tx = await solanaPublicRpc('getTransaction', [sig.signature, { encoding:'jsonParsed', commitment:'finalized', maxSupportedTransactionVersion:0 }]);
+          const tx = await solanaPublicRpc('getTransaction', [sig.signature, { encoding:'jsonParsed', commitment:'finalized', maxSupportedTransactionVersion:1 }]);
           transactionsRead++;
           const message = tx?.transaction?.message || {};
           const keys = (message.accountKeys || []).map(k => typeof k === 'string' ? k : k.pubkey);
