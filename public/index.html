@@ -15,6 +15,9 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 @media(max-width:600px){.launchGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 9px 10px}main{padding:16px 11px 40px}.header{align-items:flex-start}.headerRight{flex-direction:column;align-items:flex-end}.stats{gap:8px}.stat{padding:12px}.statValue{font-size:19px}.collectionGrid{grid-template-columns:1fr;padding:0 9px 10px}.side{display:flex}.listingGrid{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}.search{min-width:150px;flex:1}.toolbar{padding:11px}.sectionHead{padding:14px}}
 
 .walletBox{display:flex;flex-direction:column;align-items:flex-end;gap:7px;min-width:270px}.walletActions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.walletBtn,.walletDisconnect{border:1px solid #2b5471;background:linear-gradient(135deg,#10283b,#17233d);color:#dff8ff;border-radius:9px;padding:9px 12px;font:600 12px system-ui,sans-serif;cursor:pointer}.walletBtn:hover,.walletDisconnect:hover{border-color:var(--cyan);box-shadow:0 0 16px #35caff25}.solflareBtn{border-color:#59477f;background:linear-gradient(135deg,#2b1e48,#18213b)}.walletConnected{width:100%;max-width:390px;padding:9px 11px;border:1px solid #28536a;border-radius:11px;background:#0b1b2b}.walletIdentity,.walletBalance{display:flex;align-items:center;gap:8px;justify-content:space-between}.walletIdentity{font-size:11px;color:var(--muted)}.walletIdentity strong{color:#dff8ff;font-size:12px}.walletDot{width:7px;height:7px;border-radius:50%;background:#68efb2;box-shadow:0 0 9px #68efb2;flex:none}.walletBalance{margin-top:8px;color:var(--cyan);font-size:12px;font-weight:700}.walletDisconnect{padding:5px 8px;font-size:10px}.walletStatus{max-width:390px;color:var(--muted);font-size:10px;text-align:right;line-height:1.4}.walletBox [hidden]{display:none!important}@media(max-width:760px){.header{align-items:flex-start;flex-direction:column}.headerRight{width:100%;align-items:stretch;flex-direction:column}.walletBox{width:100%;align-items:stretch;min-width:0}.walletActions{justify-content:flex-start}.walletStatus{text-align:left}.walletConnected{max-width:none}.walletIdentity strong{font-size:11px}}
+
+.traitPanel{margin-top:15px}.traitTools{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:0 14px 12px}.traitUrl{flex:1;min-width:220px;background:#08111d;border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:9px;outline:none}.traitUrl:focus{border-color:#3188a8}.traitLoad{background:#12354a;border:1px solid #277b9a;color:var(--cyan);padding:10px 14px;border-radius:9px;cursor:pointer;font-weight:700}.traitStatus{font-size:11px;color:var(--muted);padding:0 15px 12px;line-height:1.5}.traitGroups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:0 14px 14px}.traitGroup{min-width:0;background:#0a1421;border:1px solid #1b2c43;border-radius:11px;padding:11px}.traitGroup h3{font-size:12px;margin:0 0 9px;color:#dff8ff}.traitValues{display:flex;flex-wrap:wrap;gap:6px;max-height:190px;overflow:auto}.traitValue{display:flex;align-items:center;gap:5px;border:1px solid #263d57;background:#0d1a2b;border-radius:7px;padding:5px 7px;font-size:10px;color:#b7c9df;cursor:pointer}.traitValue input{accent-color:#65e6ff;margin:0}.traitValue small{color:#7186a2}.traitActions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:0 14px 13px}.traitApply{background:#12354a;border:1px solid #277b9a;color:var(--cyan);padding:9px 13px;border-radius:9px;cursor:pointer;font-weight:700}.traitClear{background:#142238;border:1px solid var(--line);color:#b6c7de;padding:9px 12px;border-radius:9px;cursor:pointer}.traitResultsMeta{font-size:11px;color:var(--muted);padding:0 15px 5px}.traitNotice{margin:0 14px 12px;padding:10px 12px;border:1px solid #51452c;background:#241d12;color:#d8bd84;border-radius:9px;font-size:10px;line-height:1.5}
+@media(max-width:900px){.traitGroups{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.traitGroups{grid-template-columns:1fr;padding:0 9px 10px}.traitTools{padding:0 9px 10px}.traitActions{padding:0 9px 10px}.traitUrl{min-width:100%}.traitLoad{width:100%}}
 </style></head><body><main>
 <header class="header"><div class="brand"><div class="logo">✦</div><div><h1>Solana NFT Market Pulse</h1><div class="sub">Live collections ranked by real marketplace sales</div></div></div><div class="headerRight"><span class="pill"><i class="liveDot"></i>READ ONLY · LIVE DATA</span><div class="walletBox"><div class="walletActions"><button class="walletBtn phantomBtn" id="connectPhantom" type="button">Connect Phantom</button><button class="walletBtn solflareBtn" id="connectSolflare" type="button">Connect Solflare</button></div><div class="walletConnected" id="walletConnected" hidden><div class="walletIdentity"><span class="walletDot"></span><span id="walletName">Wallet</span><strong id="walletAddress">—</strong></div><div class="walletBalance"><span id="walletBalance">Balance loading…</span><button class="walletDisconnect" id="disconnectWallet" type="button">Disconnect</button></div></div><div class="walletStatus" id="walletStatus" role="status" aria-live="polite">Connect a wallet to view its public address and SOL balance. No transactions.</div></div></div></header>
 <section class="stats"><div class="stat"><div class="statLabel">Active collections</div><div class="statValue" id="activeCount">—</div><div class="statHint">Collections with verified collection identity</div></div><div class="stat"><div class="statLabel">Recent sales</div><div class="statValue" id="salesCount">—</div><div class="statHint">Decoded Magic Eden trades</div></div><div class="stat"><div class="statLabel">SOL volume</div><div class="statValue" id="volumeSol">—</div><div class="statHint">SOL-denominated sale amounts only</div></div><div class="stat"><div class="statLabel">Data sources</div><div class="statValue" style="font-size:17px">3 APIs</div><div class="statHint">Magic Eden + Solana RPC + QuickNode DAS</div></div></section>
@@ -23,6 +26,16 @@ main{max-width:1450px;margin:auto;padding:24px 22px 60px}.header{display:flex;al
 <aside class="side"><section class="panel"><div class="sectionHead"><h2>Latest sales</h2><span id="saleWindow">Last 15m</span></div><div id="salesFeed" class="salesList"><div class="empty">Loading real sales…</div></div></section><section class="panel"><div class="sectionHead"><h2>Coverage</h2><span>Source status</span></div><div style="padding:0 15px 15px;color:#91a6c2;font-size:11px;line-height:1.8"><div>● <b style="color:var(--green)">Magic Eden public API</b> — popular collections + recent collection sales</div><div>● <b style="color:var(--green)">Solana public RPC</b> — sampled NFT mint discovery</div><div>○ <b style="color:#d5b778">QuickNode DAS</b> — metadata hydration for discovered mints</div><div>○ Chadbot — not used as a data provider</div></div></section></aside></div>
 
 <section class="panel" style="margin-top:15px"><div class="sectionHead"><h2>Bid Arbitrage · Individual NFT Offers</h2><span id="arbStatus">Starting scanner…</span></div><div id="arbNotice" class="notice">Read-only scanner. It checks current individual NFT listings against offers received for that exact NFT. Estimated gross spread excludes fees and royalties.</div><div id="arbGrid" class="listingGrid"><div class="empty">Waiting for Magic Eden listing activity to rotate through the collection directory…</div></div></section>
+<section class="panel traitPanel" id="traitSelector">
+<div class="sectionHead"><h2>Trait Selector · Magic Eden</h2><span>Free public data · Read only</span></div>
+<div class="traitTools"><input id="traitCollectionUrl" class="traitUrl" type="url" placeholder="Paste Magic Eden collection link"><button id="loadTraitCollection" class="traitLoad" type="button">Load traits</button></div>
+<div id="traitStatus" class="traitStatus" role="status" aria-live="polite">Paste a Magic Eden collection URL, then choose one or more trait values.</div>
+<div id="traitGroups" class="traitGroups"></div>
+<div class="traitActions"><button id="applyTraitFilters" class="traitApply" type="button" disabled>Find matching listings</button><button id="clearTraitFilters" class="traitClear" type="button" disabled>Clear traits</button><span id="traitSelectionCount" class="traitResultsMeta">No traits selected</span></div>
+<div id="traitNotice" class="traitNotice hidden">Only currently active Magic Eden listings can be checked here. Unlisted NFTs are not included. This feature does not place bids or sign wallet transactions.</div>
+<div id="traitResultsMeta" class="traitResultsMeta"></div>
+<div id="traitResults" class="listingGrid"><div class="empty">Trait matches will appear here.</div></div>
+</section>
 <section class="panel" style="margin-top:15px"><div class="sectionHead"><h2>New Solana Mints · Unverified Launches</h2><span id="launchStatus">Checking free Solana RPC…</span></div><div id="launchNotice" class="notice hidden"></div><div id="launchGrid" class="launchGrid"><div class="empty">Scanning recent Solana NFT program transactions…</div></div></section>
 <section id="detail" class="panel detail hidden"><div class="detailTop"><div class="avatar" id="detailAvatar">NFT</div><div><h2 id="detailName">Collection</h2><div class="muted" id="detailMeta"></div></div><div class="detailActions"><a id="magicLink" class="close" target="_blank" rel="noopener" style="text-decoration:none">Open Collection on Magic Eden ↗</a><button class="close" id="closeDetail">Close</button></div></div><div class="detailTabs"><button class="detailTab active" id="activeListingsTab">Active Listings</button><button class="detailTab" id="recentSalesTab">Recent Sales</button></div><div class="sectionHead"><h2 id="detailTabTitle">Active Listings</h2><span id="listingCount">Loading…</span></div><div id="listings" class="listingGrid"><div class="empty">Loading collection listings from API.SH…</div></div></section>
 <div class="footer">Read-only public market data · Wallet connection only · No transaction signing or purchases · No synthetic sales or listing records</div>
@@ -116,6 +129,120 @@ function renderCollections(){
  }).join(''):'<div class="empty">No collections with sales in this time window.</div>';
  $('collections').querySelectorAll('.collection').forEach(el=>el.addEventListener('click',()=>openCollection(el.dataset.collectionId)));
 }
+
+let traitCollectionSymbol='', traitGroupsData=[], traitSelection=new Map(), traitRequestId=0;
+function parseMagicEdenSymbol(input){
+ const raw=String(input||'').trim();if(!raw)return '';
+ if(/^https?:\\/\\//i.test(raw)){
+  let url;try{url=new URL(raw)}catch(e){throw new Error('Collection link is not a valid URL')}
+  if(!['magiceden.io','www.magiceden.io'].includes(url.hostname.toLowerCase()))throw new Error('Please paste a Magic Eden collection link');
+  const parts=url.pathname.split('/').filter(Boolean);const index=parts.findIndex(x=>x.toLowerCase()==='marketplace');
+  if(index<0||!parts[index+1])throw new Error('Could not find a collection symbol in this Magic Eden link');
+  return decodeURIComponent(parts[index+1]);
+ }
+ if(!/^[a-zA-Z0-9_-]{1,100}$/.test(raw))throw new Error('Paste a Magic Eden collection URL or collection symbol');
+ return raw;
+}
+function normalizeTraitGroups(payload){
+ let rows=Array.isArray(payload)?payload:(payload?.attributes||payload?.traits||payload?.data||payload?.results||[]);
+ if(!Array.isArray(rows)&&rows&&typeof rows==='object')rows=Object.entries(rows).map(([attribute,values])=>({attribute,values}));
+ if(!Array.isArray(rows))return [];
+ return rows.map(row=>{
+  const type=String(row?.attribute??row?.traitType??row?.trait_type??row?.name??row?.key??'').trim();
+  let values=row?.values??row?.valueCounts??row?.options??row?.traits??[];
+  if(!Array.isArray(values)&&values&&typeof values==='object')values=Object.entries(values).map(([value,count])=>({value,count}));
+  if(!Array.isArray(values)&&values!==undefined&&values!==null)values=[values];
+  const normalized=(Array.isArray(values)?values:[]).map(v=>{
+   const value=String(v&&typeof v==='object'?(v.value??v.name??v.traitValue??v.trait_value??''):v??'').trim();
+   const count=v&&typeof v==='object'?Number(v.count??v.total??v.rarityCount??0):0;
+   return value?{value,count:Number.isFinite(count)?count:0}:null;
+  }).filter(Boolean);
+  return type&&normalized.length?{type,values:normalized}:null;
+ }).filter(Boolean).sort((a,b)=>a.type.localeCompare(b.type));
+}
+function selectedTraitGroups(){
+ return [...traitSelection.entries()].filter(([,values])=>values.size).map(([type,values])=>[...values].map(value=>({traitType:type,value})));
+}
+function updateTraitSelectionUi(){
+ const groups=selectedTraitGroups();const count=groups.reduce((n,g)=>n+g.length,0);
+ $('traitSelectionCount').textContent=count+' selected values across '+groups.length+' trait types';
+ $('applyTraitFilters').disabled=!traitCollectionSymbol||!count;
+ $('clearTraitFilters').disabled=!count;
+}
+function renderTraitGroups(){
+ const root=$('traitGroups');
+ if(!traitGroupsData.length){root.innerHTML='';return;}
+ root.innerHTML=traitGroupsData.map(group=>{
+  const values=group.values.slice().sort((a,b)=>(b.count||0)-(a.count||0)||a.value.localeCompare(b.value)).slice(0,100);
+  return '<section class="traitGroup"><h3>'+escapeHtml(group.type)+' <span style="color:var(--muted);font-weight:400">('+group.values.length+')</span></h3><div class="traitValues">'+values.map(item=>{
+   const checked=traitSelection.get(group.type)?.has(item.value)||false;
+   return '<label class="traitValue"><input type="checkbox" data-trait-type="'+escapeHtml(group.type)+'" data-trait-value="'+escapeHtml(item.value)+'" '+(checked?'checked':'')+'><span>'+escapeHtml(item.value)+'</span>'+(item.count?'<small>'+item.count+'</small>':'')+'</label>';
+  }).join('')+'</div>'+(group.values.length>100?'<div class="traitStatus">Showing first 100 values.</div>':'')+'</section>';
+ }).join('');
+ root.querySelectorAll('input[type="checkbox"][data-trait-type]').forEach(input=>input.addEventListener('change',()=>{
+  const type=input.dataset.traitType,value=input.dataset.traitValue;
+  if(!traitSelection.has(type))traitSelection.set(type,new Set());
+  if(input.checked)traitSelection.get(type).add(value);else traitSelection.get(type).delete(value);
+  updateTraitSelectionUi();
+ }));
+ updateTraitSelectionUi();
+}
+async function loadTraitCollection(){
+ const button=$('loadTraitCollection');button.disabled=true;
+ try{
+  const symbol=parseMagicEdenSymbol($('traitCollectionUrl').value);
+  $('traitStatus').textContent='Loading public trait attributes for '+symbol+'…';
+  $('traitGroups').innerHTML='';$('traitResults').innerHTML='<div class="empty">Choose traits after they load.</div>';
+  $('traitResultsMeta').textContent='';$('traitNotice').classList.add('hidden');
+  const response=await fetch('/api/market/collection/'+encodeURIComponent(symbol)+'/traits');
+  const data=await response.json();if(!response.ok||!data.success)throw new Error(data.error||'Could not load collection traits');
+  traitCollectionSymbol=symbol;traitGroupsData=normalizeTraitGroups(data.attributes);traitSelection=new Map();
+  if(!traitGroupsData.length)throw new Error('Magic Eden returned no readable trait values for this collection');
+  renderTraitGroups();$('traitStatus').textContent='Loaded '+traitGroupsData.length+' trait types for '+symbol+'. Select values below.';
+  $('traitNotice').classList.remove('hidden');
+ }catch(error){
+  traitCollectionSymbol='';traitGroupsData=[];traitSelection=new Map();$('traitGroups').innerHTML='';
+  $('traitStatus').textContent=error.message;$('applyTraitFilters').disabled=true;
+ }finally{button.disabled=false;updateTraitSelectionUi();}
+}
+function renderTraitListings(items){
+ const grid=$('traitResults');
+ grid.innerHTML=items.length?items.map(item=>{
+  const nft=item.token||item.nft||item.item||item.asset||item;
+  const mint=nft.tokenMint||nft.mint||nft.mintAddress||nft.id||item.tokenMint||item.mint||item.mintAddress||'';
+  const name=nft.name||nft.title||item.name||item.title||short(mint||'Solana NFT');
+  const image=nft.image||nft.imageUrl||nft.imageURI||nft.img||item.image||item.imageUrl||null;
+  const price=item.listPrice??item.price??item.priceSol??item.price_sol??item.amount??nft.listPrice??nft.price??'—';
+  const href=mint?'https://magiceden.io/item-details/'+encodeURIComponent(mint):'';
+  const traits=Array.isArray(nft.attributes)?nft.attributes.map(x=>(x.trait_type||x.traitType||x.attribute)+': '+(x.value??'')).join(' · '):'';
+  return '<article class="listing">'+(image?'<img src="'+escapeHtml(image)+'" alt="" loading="lazy">':'<div style="aspect-ratio:1;background:#111d2d;display:grid;place-items:center;color:#65e6ff">NFT</div>')+'<div class="listingBody"><div class="listingName">'+escapeHtml(name)+'</div><div class="listingPrice">'+money(price)+' SOL</div><div class="listingMint">'+escapeHtml(traits||short(mint))+'</div>'+(href?'<a class="listingMint" style="display:block;color:var(--cyan);margin-top:7px" href="'+escapeHtml(href)+'" target="_blank" rel="noopener noreferrer">Open NFT on Magic Eden ↗</a>':'')+'</div></article>';
+ }).join(''):'<div class="empty">No active listings matched these selected traits.</div>';
+}
+async function applyTraitFilters(){
+ const groups=selectedTraitGroups();if(!traitCollectionSymbol||!groups.length)return;
+ const request=++traitRequestId;$('applyTraitFilters').disabled=true;
+ $('traitResults').innerHTML='<div class="empty">Checking matching active Magic Eden listings…</div>';
+ $('traitResultsMeta').textContent='Searching '+traitCollectionSymbol+'…';
+ try{
+  const query=new URLSearchParams({attributes:JSON.stringify(groups)});
+  const response=await fetch('/api/market/collection/'+encodeURIComponent(traitCollectionSymbol)+'/trait-listings?'+query.toString());
+  const data=await response.json();if(!response.ok||!data.success)throw new Error(data.error||'Trait listing search failed');
+  if(request!==traitRequestId)return;
+  renderTraitListings(data.items||[]);
+  $('traitResultsMeta').textContent=(data.hasMore?'100+':'')+data.count+' active Magic Eden listings matched · sorted by lowest price';
+  $('traitNotice').textContent=data.note+' This is a read-only preview; no bids, wallet signatures or purchases are made.';
+  $('traitNotice').classList.remove('hidden');
+ }catch(error){if(request===traitRequestId){$('traitResultsMeta').textContent='';$('traitResults').innerHTML='<div class="empty">'+escapeHtml(error.message)+'</div>';}}
+ finally{if(request===traitRequestId)updateTraitSelectionUi();}
+}
+function clearTraitFilters(){
+ traitSelection=new Map();renderTraitGroups();$('traitResultsMeta').textContent='';$('traitResults').innerHTML='<div class="empty">Choose traits, then find matching listings.</div>';updateTraitSelectionUi();
+}
+$('loadTraitCollection').addEventListener('click',loadTraitCollection);
+$('traitCollectionUrl').addEventListener('keydown',event=>{if(event.key==='Enter')loadTraitCollection();});
+$('applyTraitFilters').addEventListener('click',applyTraitFilters);
+$('clearTraitFilters').addEventListener('click',clearTraitFilters);
+
 function renderLaunches(data){
   const grid=$('launchGrid');
   if(!data.configured){$('launchStatus').textContent='QuickNode setup needed';$('launchNotice').textContent='Create a QuickNode Solana Mainnet endpoint with Metaplex DAS enabled, then add its endpoint URL to Railway as QUICKNODE_RPC_URL. No API key is shown in the dashboard.';$('launchNotice').classList.remove('hidden');grid.innerHTML='<div class="empty">Mint discovery is ready in the dashboard code, but QuickNode is not connected yet.</div>';return;}
