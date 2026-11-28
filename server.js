@@ -115,6 +115,8 @@ let bitquerySalesSnapshot = { at: 0, data: null, pending: null };
 const collectionLookupCache = new Map();
 const collectionLookupPending = new Map();
 const listingsCache = new Map();
+const traitAttributesCache = new Map();
+const traitListingsCache = new Map();
 const activitiesCache = new Map();
 const launchCache = { at: 0, data: null };
 
@@ -1318,6 +1320,76 @@ app.get('/api/market/arbitrage', (req, res) => {
       running:arbitrageScanner.running,lastScanAt:arbitrageScanner.lastScanAt,lastError:arbitrageScanner.lastError},
     note:'Only current Magic Eden token listings are compared with token-specific received offers. Expired or explicitly inactive offers are excluded. Gross spread is before marketplace fees, royalties and transaction costs. Scanner discovers listing activity while the existing all-collection activity scan rotates through Magic Eden collections; coverage is limited to Magic Eden.'});
 });
+app.get('/api/market/collection/:symbol/traits', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim();
+  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(symbol)) {
+    return res.status(400).json({ success:false, error:'Invalid Magic Eden collection symbol' });
+  }
+  const key = symbol.toLowerCase(), cached = traitAttributesCache.get(key);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return res.json(cached.data);
+  try {
+    const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/attributes');
+    const result = { success:true, symbol, source:'Magic Eden public Solana API', attributes:data };
+    traitAttributesCache.set(key, { at:Date.now(), data:result });
+    res.set('Cache-Control','public, max-age=300');
+    res.json(result);
+  } catch (error) {
+    console.error('Magic Eden collection traits failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success:false, source:'Magic Eden public Solana API', error:error.message });
+  }
+});
+
+app.get('/api/market/collection/:symbol/trait-listings', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim();
+  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(symbol)) {
+    return res.status(400).json({ success:false, error:'Invalid Magic Eden collection symbol' });
+  }
+  let groups;
+  try { groups = JSON.parse(String(req.query.attributes || '')); }
+  catch { return res.status(400).json({ success:false, error:'Trait filters must be valid JSON' }); }
+  if (!Array.isArray(groups) || !groups.length || groups.length > 12) {
+    return res.status(400).json({ success:false, error:'Select between 1 and 12 trait types' });
+  }
+  const normalized = [];
+  for (const group of groups) {
+    if (!Array.isArray(group) || !group.length || group.length > 30) {
+      return res.status(400).json({ success:false, error:'Each trait type must contain 1 to 30 selected values' });
+    }
+    const values = [];
+    let traitType = null;
+    for (const entry of group) {
+      const type = typeof entry?.traitType === 'string' ? entry.traitType.trim() : '';
+      const value = typeof entry?.value === 'string' ? entry.value.trim() : String(entry?.value ?? '').trim();
+      if (!type || !value || type.length > 120 || value.length > 200 || (traitType && traitType !== type)) {
+        return res.status(400).json({ success:false, error:'Invalid trait type or value' });
+      }
+      traitType = type;
+      values.push({ traitType:type, value });
+    }
+    normalized.push(values);
+  }
+  const key = symbol.toLowerCase() + ':' + JSON.stringify(normalized);
+  const cached = traitListingsCache.get(key);
+  if (cached && Date.now() - cached.at < 15000) return res.json(cached.data);
+  try {
+    const data = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/listings', {
+      offset:0, limit:100, sort:'listPrice', sort_direction:'asc',
+      listingAggMode:true, attributes:JSON.stringify(normalized)
+    });
+    const items = findListingRows(data);
+    const result = {
+      success:true, symbol, source:'Magic Eden public Solana API',
+      count:items.length, limit:100, hasMore:items.length >= 100, items,
+      note:'Matches are active Magic Eden listings only, not every NFT owned or every unlisted NFT in the collection. At most the first 100 matching listings are shown.'
+    };
+    traitListingsCache.set(key, { at:Date.now(), data:result });
+    res.json(result);
+  } catch (error) {
+    console.error('Magic Eden trait-filtered listings failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success:false, source:'Magic Eden public Solana API', error:error.message });
+  }
+});
+
 app.get('/api/market/collection/:symbol/activities', async (req, res) => {
   const symbol = String(req.params.symbol || '').trim();
   if (!symbol || symbol.length > 120) return res.status(400).json({ success:false, error:'Invalid Magic Eden collection symbol' });
