@@ -133,7 +133,7 @@ function renderCollections(){
 let traitCollectionSymbol='', traitGroupsData=[], traitSelection=new Map(), traitRequestId=0;
 function parseMagicEdenSymbol(input){
  const raw=String(input||'').trim();if(!raw)return '';
- if(/^https?:\\/\\//i.test(raw)){
+ if(raw.startsWith('http://')||raw.startsWith('https://')){
   let url;try{url=new URL(raw)}catch(e){throw new Error('Collection link is not a valid URL')}
   if(!['magiceden.io','www.magiceden.io'].includes(url.hostname.toLowerCase()))throw new Error('Please paste a Magic Eden collection link');
   const parts=url.pathname.split('/').filter(Boolean);const index=parts.findIndex(x=>x.toLowerCase()==='marketplace');
@@ -229,7 +229,7 @@ async function applyTraitFilters(){
   const data=await response.json();if(!response.ok||!data.success)throw new Error(data.error||'Trait listing search failed');
   if(request!==traitRequestId)return;
   renderTraitListings(data.items||[]);
-  $('traitResultsMeta').textContent=(data.hasMore?'100+':'')+data.count+' active Magic Eden listings matched · sorted by lowest price';
+  $('traitResultsMeta').textContent=(data.hasMore?'100 listings shown (there may be more)':' '+data.count+' active listings matched')+' · sorted by lowest price';
   $('traitNotice').textContent=data.note+' This is a read-only preview; no bids, wallet signatures or purchases are made.';
   $('traitNotice').classList.remove('hidden');
  }catch(error){if(request===traitRequestId){$('traitResultsMeta').textContent='';$('traitResults').innerHTML='<div class="empty">'+escapeHtml(error.message)+'</div>';}}
