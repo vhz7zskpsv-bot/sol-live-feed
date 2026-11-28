@@ -337,10 +337,21 @@ async function scanRecentSolanaMintsFree() {
               const targetProgramId = targetIx.programId || keys[targetIx.programIdIndex] || '';
               const accounts = (targetIx.accounts || []).map(a => typeof a === 'number' ? keys[a] : (typeof a === 'string' ? a : a?.pubkey)).filter(Boolean);
               let id = null, detectedStandard = program.standard;
-              if (targetProgramId === 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s') { id = accounts[1] || null; detectedStandard = 'NFT'; }
-              else if (targetProgramId === 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d') { id = accounts[0] || null; detectedStandard = 'MPL Core'; }
+              const parsedType = String(targetIx.parsed?.type || '').toLowerCase();
+              if (targetProgramId === 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s') {
+                // Only metadata-creation instructions contain the newly created mint at account[1].
+                // Update/verify/master-edition instructions use different account layouts.
+                if (!parsedType.startsWith('createmetadataaccount')) continue;
+                id = targetIx.parsed?.info?.mint || accounts[1] || null;
+                detectedStandard = 'NFT';
+              }
+              else if (targetProgramId === 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d') {
+                if (parsedType && !parsedType.includes('createv1')) continue;
+                id = targetIx.parsed?.info?.asset || accounts[0] || null;
+                detectedStandard = 'MPL Core';
+              }
               else if (targetProgramId === 'BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY') {
-                const match = logs.match(/Leaf asset ID:\\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+                const match = logs.match(/Leaf asset ID:\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i);
                 id = match?.[1] || null; detectedStandard = 'cNFT';
               }
               if (!id || candidates.has(id)) continue;
@@ -401,10 +412,23 @@ async function scanRecentSolanaMintsFree() {
   launchCache.at = Date.now(); launchCache.data = data; return data;
 }
 function getRecentSolanaMintsFree() {
-  if (launchCache.data && Date.now() - launchCache.at < 45000) return Promise.resolve(launchCache.data);
-  if (launchScanPending) return launchScanPending;
-  launchScanPending = scanRecentSolanaMintsFree().finally(() => { launchScanPending = null; });
-  return launchScanPending;
+  if (launchCache.data && Date.now() - launchCache.at < 45000) {
+    return Promise.resolve({ ...launchCache.data, scanInProgress: Boolean(launchScanPending) });
+  }
+  if (!launchScanPending) {
+    launchScanPending = scanRecentSolanaMintsFree()
+      .catch(error => {
+        console.error('Background free-source mint scan failed:', error.status || 'network', error.message);
+        return null;
+      })
+      .finally(() => { launchScanPending = null; });
+  }
+  // Never keep the mobile dashboard request open for the entire serial RPC scan.
+  // The dashboard polls again and receives the completed cached result.
+  return Promise.resolve(launchCache.data
+    ? { ...launchCache.data, scanInProgress: true, note: 'Mint scan is running in the background; cached results are shown until it completes.' }
+    : { configured: true, scannedAt: null, assets: [], collections: [], scanInProgress: true,
+        note: 'Initial mint scan is running in the background. Results will appear automatically when RPC discovery and metadata checks finish.' });
 }
 
 function findArray(value, predicate, depth = 0) {
