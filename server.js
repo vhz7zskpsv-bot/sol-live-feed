@@ -822,7 +822,7 @@ async function getAllMagicEdenCollections() {
 
 async function refreshMagicEdenHotCollections() {
   if (magicEdenScanner.hotCollections.length &&
-      Date.now() - magicEdenScanner.hotCollectionScanAt < 120000) return;
+      Date.now() - magicEdenScanner.hotCollectionScanAt < 60000) return;
   try {
     const raw = await magicEdenGet('/marketplace/popular_collections', { timeRange: '1d' });
     const rows = Array.isArray(raw) ? raw :
@@ -911,20 +911,13 @@ async function scanMagicEdenCollection(collection) {
   const symbol = String(collection.symbol || '').trim();
   if (!symbol) return;
   try {
-    // Keep the compatible 100-row page size. Larger single-page limits have
-    // returned HTTP 400, so page with offsets instead when a collection is busy.
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    for (let offset = 0; offset < 1000; offset += 100) {
-      const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset, limit: 100 });
-      const rows = findListingRows(raw);
-      magicEdenScanner.rawActivityRows += rows.length;
-      for (const item of rows) { recordMagicEdenActivitySale(item, collection); enqueueArbitrageListing(item, collection); }
-      if (rows.length < 100) break;
-      const pageTimes = rows.map(item => normalizeMagicEdenActivityTime(
-        item.blockTime ?? item.block_time ?? item.blocktime ?? item.time ?? item.createdAt ?? item.created_at ?? null
-      )).filter(Boolean).map(value => new Date(value).getTime());
-      if (pageTimes.length && Math.min(...pageTimes) < cutoff) break;
-    }
+    // Always fetch the newest activity page first. Deep pagination through
+    // busy collections delayed fresh sales by many minutes; historical rows
+    // are retained in the rolling 24h store from earlier scans.
+    const raw = await magicEdenGet('/collections/' + encodeURIComponent(symbol) + '/activities', { offset: 0, limit: 100 });
+    const rows = findListingRows(raw);
+    magicEdenScanner.rawActivityRows += rows.length;
+    for (const item of rows) { recordMagicEdenActivitySale(item, collection); enqueueArbitrageListing(item, collection); }
   } catch (error) {
     magicEdenScanner.errors.push(symbol + ': ' + error.message);
     if (magicEdenScanner.errors.length > 40) magicEdenScanner.errors.shift();
@@ -962,23 +955,6 @@ async function runMagicEdenSalesScanner() {
           continue;
         }
 
-        // Re-scan the most active collections every two minutes so new sales
-        // do not wait for the full directory cycle.
-        if (!magicEdenScanner.hotCollections.length ||
-            Date.now() - magicEdenScanner.hotCollectionScanAt >= 120000) {
-          await refreshMagicEdenHotCollections();
-        }
-        if (magicEdenScanner.hotCollectionIndex < magicEdenScanner.hotCollections.length) {
-          const hotCollection = magicEdenScanner.hotCollections[magicEdenScanner.hotCollectionIndex];
-          await scanMagicEdenCollection(hotCollection);
-          magicEdenScanner.hotCollectionIndex++;
-          if (magicEdenScanner.hotCollectionIndex >= magicEdenScanner.hotCollections.length) {
-            magicEdenScanner.hotCollectionScanAt = Date.now();
-          }
-          saveMagicEdenScannerState();
-          continue;
-        }
-
         if (magicEdenScanner.index >= magicEdenScanner.collections.length) {
           magicEdenScanner.lastCycleCompletedAt = new Date().toISOString();
           magicEdenScanner.cycle++;
@@ -1006,11 +982,40 @@ async function runMagicEdenSalesScanner() {
   }
 }
 
+let magicEdenHotScannerRunning = false;
+async function runMagicEdenHotSalesScanner() {
+  if (magicEdenHotScannerRunning) return;
+  magicEdenHotScannerRunning = true;
+  try {
+    while (true) {
+      try {
+        await refreshMagicEdenHotCollections();
+        const hot = magicEdenScanner.hotCollections.slice();
+        for (const collection of hot) {
+          await scanMagicEdenCollection(collection);
+        }
+        // A complete hot pass is kept independent from the slower full-directory pass.
+        await new Promise(resolve => setTimeout(resolve, 15000));
+      } catch (error) {
+        console.warn('Magic Eden hot sales scanner cycle failed:', error.status || 'network', error.message);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
+    }
+  } finally {
+    magicEdenHotScannerRunning = false;
+  }
+}
 function ensureMagicEdenSalesScanner() {
   if (!magicEdenScanner.running) {
     runMagicEdenSalesScanner().catch(error => {
       magicEdenScanner.running = false;
       console.error('Magic Eden sales scanner stopped:', error.message);
+    });
+  }
+  if (!magicEdenHotScannerRunning) {
+    runMagicEdenHotSalesScanner().catch(error => {
+      magicEdenHotScannerRunning = false;
+      console.error('Magic Eden hot sales scanner stopped:', error.message);
     });
   }
 }
@@ -1048,7 +1053,7 @@ async function getMagicEdenSalesSnapshot() {
 
 async function getGlobalNftSales(minutes) {
   const old = salesCache.get(minutes);
-  if (old && Date.now() - old.at < 45000) return old.data;
+  if (old && Date.now() - old.at < 5000) return old.data;
   if (salesPending.has(minutes)) return salesPending.get(minutes);
 
   const pending = (async () => {
