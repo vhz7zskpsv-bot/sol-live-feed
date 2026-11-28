@@ -1366,6 +1366,34 @@ app.get('/api/launches/recent', async (req, res) => {
   }
 });
 
+// Read-only wallet SOL balance. Keeps the RPC URL and any provider credentials server-side.
+app.get('/api/wallet/balance', async (req, res) => {
+  const address = String(req.query.address || '').trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+    return res.status(400).json({ success:false, error:'Invalid Solana wallet address' });
+  }
+  try {
+    const rpcUrl = QUICKNODE_RPC_URL || 'https://api.mainnet-beta.solana.com';
+    const response = await fetch(rpcUrl, {
+      method:'POST',
+      headers:{ 'content-type':'application/json', 'accept':'application/json' },
+      body:JSON.stringify({ jsonrpc:'2.0', id:1, method:'getBalance', params:[address,{ commitment:'confirmed' }] }),
+      signal:AbortSignal.timeout(12000)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.error || !Number.isFinite(payload.result?.value)) {
+      const error = new Error(payload.error?.message || 'Solana RPC balance request failed');
+      error.status = response.status || 502;
+      throw error;
+    }
+    res.set('Cache-Control','private, max-age=5');
+    res.json({ success:true, address, lamports:payload.result.value, sol:payload.result.value / 1e9, source:QUICKNODE_RPC_URL ? 'configured RPC' : 'Solana public RPC' });
+  } catch (error) {
+    console.error('Wallet balance RPC failed:', error.status || 'network', error.message);
+    res.status(error.status || 502).json({ success:false, error:'Wallet balance temporarily unavailable' });
+  }
+});
+
 app.get('/api/config', (req, res) => {
   res.json({
     provider: 'Magic Eden public API + Solana public RPC',
